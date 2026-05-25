@@ -86,6 +86,11 @@ export function TelemetryPanel({ telemetry, calibratedLength, frequencyHz, isRun
               elapsed: {formatTime(telemetry.session_elapsed_s)}
             </div>
           )}
+          {hasLimit && telemetry.session_remaining_s < 60 && (
+            <div style={{ fontSize: '0.7rem', color: 'var(--color-warning)', marginTop: '4px', fontWeight: 'bold' }}>
+              ⚠️ Auto-stopping soon!
+            </div>
+          )}
         </div>
 
         <div className="telemetry-card">

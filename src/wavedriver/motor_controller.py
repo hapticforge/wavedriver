@@ -1,53 +1,50 @@
-import gc
-import time
-import math
-import datetime
-import logging
-import threading
-import queue
 import collections
+import datetime
+import gc
+import logging
+import math
+import queue
+import threading
+import time
 from enum import Enum
+from typing import Any
+
+from wavedriver.actuator_protocol import StreamDataProtocol
+from wavedriver.config import Config
+from wavedriver.patterns import PatternFunc
 
 logger = logging.getLogger("wavedriver.controller")
 
 # ── Modbus register addresses ─────────────────────────────────────────────────
-_REG_FORCE_FILTER   = 175   # MB_FORCE_FILTER  (0 = no filter)
-_REG_POS_FILTER     = 176   # MB_POS_FILTER    (0 = no filter)
-_REG_SOFTSTART_MS   = 150   # PC_SOFTSTART_PERIOD (ms)
-_REG_POS_MAX_VEL    = 153   # position-mode velocity cap (mm/s)
-_REG_POS_MAX_ACCEL  = 154   # position-mode acceleration cap (mm/s²)
-_REG_POS_MAX_DECEL  = 155   # position-mode deceleration cap (mm/s²)
+_REG_FORCE_FILTER = 175  # MB_FORCE_FILTER  (0 = no filter)
+_REG_POS_FILTER = 176  # MB_POS_FILTER    (0 = no filter)
+_REG_SOFTSTART_MS = 150  # PC_SOFTSTART_PERIOD (ms)
+_REG_POS_MAX_VEL = 153  # position-mode velocity cap (mm/s)
+_REG_POS_MAX_ACCEL = 154  # position-mode acceleration cap (mm/s²)
+_REG_POS_MAX_DECEL = 155  # position-mode deceleration cap (mm/s²)
 
-# ── Hardware motion limits ────────────────────────────────────────────────────
-_INIT_MAX_VEL_MM_S    = 500    # velocity limit written at init and after calibration
-_INIT_MAX_ACCEL_MM_S2 = 8000   # accel/decel limits written at init and after calibration
-_INIT_SOFTSTART_MS    = 200    # position controller soft-start period
-_CALIB_VEL_UM_S       = 80000.0  # homing traverse speed (µm/s = 80 mm/s)
-
-# ── Safety thresholds ─────────────────────────────────────────────────────────
-_TEMP_WARNING_C = 65      # temperature at which a warning banner is shown
-_TEMP_ESTOP_C   = 75      # software over-temperature threshold (°C), below 80 °C hardware limit
-_VOLTAGE_LOW_MV = 18000   # minimum acceptable supply voltage (mV); 18 V for a nominal 24 V supply
-
-# ── Timing constants ──────────────────────────────────────────────────────────
-_TELEMETRY_INTERVAL_S = 0.050   # 20 Hz low-frequency loop period
+# ── Default config (used when no Config is passed to MotorController) ─────────
+_DEFAULT_CONFIG = Config()
 
 # ── Internal param filter ─────────────────────────────────────────────────────
-_EXTRA_PARAMS_EXCLUDE = frozenset(('stroke_length_um', 'frequency_hz', '_max_catch_up_speed_um_s', '_pattern_name'))
+_EXTRA_PARAMS_EXCLUDE = frozenset(
+    ("stroke_length_um", "frequency_hz", "_max_catch_up_speed_um_s", "_pattern_name")
+)
 
 
 class ControllerState(Enum):
     """Defines the operational and calibration states of the pleasure controller."""
-    UNCONNECTED         = "Unconnected"
-    CONNECTING          = "Connecting"
-    CONNECTED           = "Connected (Uncalibrated)"
+
+    UNCONNECTED = "Unconnected"
+    CONNECTING = "Connecting"
+    CONNECTED = "Connected (Uncalibrated)"
     CALIBRATING_RETRACT = "Calibrating (Retracting)"
-    CALIBRATING_EXTEND  = "Calibrating (Extending)"
-    CALIBRATING_CENTER  = "Calibrating (Centering)"
-    CALIBRATED_IDLE     = "Calibrated & Idle"
-    RUNNING             = "Running"
-    ESTOP               = "EMERGENCY STOP (Force Exceeded)"
-    ERROR               = "Error"
+    CALIBRATING_EXTEND = "Calibrating (Extending)"
+    CALIBRATING_CENTER = "Calibrating (Centering)"
+    CALIBRATED_IDLE = "Calibrated & Idle"
+    RUNNING = "Running"
+    ESTOP = "EMERGENCY STOP (Force Exceeded)"
+    ERROR = "Error"
 
 
 class MotorController:
@@ -59,70 +56,105 @@ class MotorController:
       and connection watchdogs to prevent bus saturation.
     """
 
-    def __init__(self, use_mock: bool = False) -> None:
+    def __init__(self, use_mock: bool = False, config: Config | None = None) -> None:
         """Initializes the controller state, communication fields, and pattern buffers.
 
         Args:
             use_mock: If True, forces offline simulation mode utilizing the mock actuator.
+            config: Safety and timing tunables.  Defaults to ``Config()`` (production values).
+                Pass a custom instance in tests (e.g. ``Config(ui_deadman_s=0.5)``) instead
+                of monkey-patching module constants.
         """
+        self.config = config if config is not None else _DEFAULT_CONFIG
         self.use_mock = use_mock
         self._simulation_reason = ""
 
+        _sdk_mod: Any
         if self.use_mock:
-            from wavedriver import mock_actuator as sdk
+            from wavedriver import mock_actuator as _sdk_mod
+
             self._simulation_reason = "Mock mode enabled (--mock flag)"
         else:
             try:
-                import pyorcasdk as sdk
+                import pyorcasdk as _sdk_mod  # noqa: F811
             except ImportError:
-                from wavedriver import mock_actuator as sdk
+                from wavedriver import mock_actuator as _sdk_mod
+
                 self.use_mock = True
                 self._simulation_reason = "pyorcasdk not installed — hardware unavailable"
 
-        self.sdk      = sdk
-        self.actuator = None
-        self.port     = "/dev/ttyUSB0"
-        self.baud     = 19200
+        self.sdk: Any = _sdk_mod
+        self.actuator: Any = None
+        self.port = "/dev/ttyUSB0"
+        self.baud = 19200
+
+        # ── Lock discipline ───────────────────────────────────────────────────────
+        # self.lock protects all fields below that are accessed from both the
+        # control thread and the UI thread (via get_telemetry / send_command).
+        #
+        # SHARED (must hold self.lock to read OR write):
+        #   state, error_msg, position_um, force_mN, speed_mm_s, temperature_C,
+        #   voltage_mV, power_W, errors_bitmask, calibrated_length_um,
+        #   software_min_um, software_max_um, max_feedback_force_mN,
+        #   current_pattern, pattern_params, _current_pattern_name,
+        #   _session_start_time, _max_session_s, _paused, _last_ui_poll_time
+        #
+        # CONTROL-THREAD-ONLY (no lock needed — written and read exclusively
+        # from _run_loop and the helpers it calls):
+        #   _amplitude_target, _pre_pause_amplitude, _soft_stopping,
+        #   _pattern_amplitude_scale, _stroke_um_current/_target,
+        #   _freq_hz_current/_target, _current_phase, _commanded_pos_um,
+        #   _max_pattern_speed_um_s, _extra_params, _temp_warned,
+        #   _calibration_target, _calibration_stage_ticks, _position_history,
+        #   _force_exceed_count, _last_set_mode, pattern_start_time
+        #
+        # WRITE-ONCE / READ-ONLY after init (no lock needed):
+        #   sdk, use_mock, _simulation_reason, port, baud
+        # ─────────────────────────────────────────────────────────────────────────
 
         # Telemetry & State (thread-safe via lock)
-        self.lock             = threading.Lock()
-        self.state            = ControllerState.UNCONNECTED
-        self.error_msg        = ""
-        self.position_um      = 0
-        self.force_mN         = 0
-        self.speed_mm_s       = 0.0
-        self.temperature_C    = 0
-        self.voltage_mV       = 0
-        self.power_W          = 0
-        self.errors_bitmask   = 0
+        self.lock = threading.Lock()
+        self.state = ControllerState.UNCONNECTED
+        self.error_msg = ""
+        self.position_um = 0
+        self.force_mN = 0
+        self.speed_mm_s = 0.0
+        self.temperature_C = 0
+        self.voltage_mV = 0
+        self.power_W = 0
+        self.errors_bitmask = 0
         self.calibrated_length_um = 0
-        self.software_min_um  = 5000
-        self.software_max_um  = 145000
+        self.software_min_um = 5000
+        self.software_max_um = 145000
 
         # Safety Configuration
         self.max_feedback_force_mN = 55000  # Default 55 N (under 60 N hardware limit)
 
+        # UI deadman: timestamp of last get_telemetry() call from the UI thread.
+        # Written by the UI thread under self.lock; read by the control thread.
+        self._last_ui_poll_time: float | None = None
+
         # Control inputs
-        self.current_pattern          = None
-        self.pattern_params           = {}
-        self.pattern_start_time       = 0.0
-        self._pattern_amplitude_scale = 0.0   # current interpolated scale (0 → 1)
-        self._amplitude_target        = 1.0   # desired scale; bidirectional ramp converges here
-        self._pre_pause_amplitude     = 1.0   # saved target before pause, restored on resume
+        self.current_pattern: PatternFunc | None = None
+        self.pattern_params: dict[str, Any] = {}
+        self.pattern_start_time = 0.0
+        self._pattern_amplitude_scale = 0.0  # current interpolated scale (0 → 1)
+        self._amplitude_target = 1.0  # desired scale; bidirectional ramp converges here
+        self._pre_pause_amplitude = 1.0  # saved target before pause, restored on resume
 
         # Pause / soft-stop flags (written only in control thread)
-        self._paused        = False
+        self._paused = False
         self._soft_stopping = False
 
         # Session timer
-        self._session_start_time = None   # set when first start_pattern received
-        self._max_session_s      = 0      # 0 = no limit
+        self._session_start_time: float | None = None  # set when first start_pattern received
+        self._max_session_s = 0  # 0 = no limit
 
         # Interpolated pattern parameters (smoothly blend to new targets at 500 Hz)
         self._stroke_um_current = 50000.0
-        self._stroke_um_target  = 50000.0
-        self._freq_hz_current   = 1.0
-        self._freq_hz_target    = 1.0
+        self._stroke_um_target = 50000.0
+        self._freq_hz_current = 1.0
+        self._freq_hz_target = 1.0
 
         # Accumulated phase (integrated as φ += 2π·f·dt so frequency changes
         # never cause a back-calculated ω·t phase jump).
@@ -130,28 +162,28 @@ class MotorController:
 
         # Rate-limited commanded position: smooths approach from far-away positions.
         # None means "reinitialize from current position on next tick".
-        self._commanded_pos_um       = None
+        self._commanded_pos_um: float | None = None
         self._max_pattern_speed_um_s = 500000.0  # µm/s; updated from pattern params
 
         # Extra (non-interpolated) pattern params cached at command time
-        self._extra_params = {}
+        self._extra_params: dict[str, Any] = {}
 
         # Activity event log: ring buffer of formatted strings
-        self._event_log      = collections.deque(maxlen=100)
-        self._temp_warned    = False       # prevents duplicate warning log entries
-        self._current_pattern_name = ""   # for telemetry display
+        self._event_log: collections.deque[str] = collections.deque(maxlen=100)
+        self._temp_warned = False  # prevents duplicate warning log entries
+        self._current_pattern_name = ""  # for telemetry display
 
         # Thread management
-        self.cmd_queue  = queue.Queue()
-        self.thread     = None
+        self.cmd_queue: queue.Queue[tuple[str, dict[str, Any]]] = queue.Queue()
+        self.thread: threading.Thread | None = None
         self.stop_event = threading.Event()
 
         # Calibration state
-        self._position_history        = collections.deque(maxlen=10)
-        self._calibration_target      = None
+        self._position_history: collections.deque[int] = collections.deque(maxlen=10)
+        self._calibration_target: float | None = None
         self._calibration_stage_ticks = 0
-        self._last_set_mode           = None
-        self._force_exceed_count      = 0
+        self._last_set_mode: Any = None
+        self._force_exceed_count = 0
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -166,8 +198,9 @@ class MotorController:
         self.baud = baud
         self.stop_event.clear()
         self.state = ControllerState.CONNECTING
-        self.thread = threading.Thread(target=self._run_loop, daemon=True)
-        self.thread.start()
+        t = threading.Thread(target=self._run_loop, daemon=True)
+        self.thread = t
+        t.start()
 
     def stop(self) -> None:
         """Safely stops the background thread, placing the motor in Sleep Mode."""
@@ -176,7 +209,7 @@ class MotorController:
             self.thread.join(timeout=1.5)
         self.state = ControllerState.UNCONNECTED
 
-    def send_command(self, cmd_type: str, **kwargs) -> None:
+    def send_command(self, cmd_type: str, **kwargs: Any) -> None:
         """Enqueues a command (e.g., 'start_pattern', 'estop') for processing by the thread.
 
         Args:
@@ -185,7 +218,7 @@ class MotorController:
         """
         self.cmd_queue.put((cmd_type, kwargs))
 
-    def get_telemetry(self) -> dict:
+    def get_telemetry(self) -> dict[str, Any]:
         """Returns a thread-safe snapshot dictionary of live device telemetry.
 
         Includes state representation, current physical position, feedback resistance force,
@@ -194,34 +227,39 @@ class MotorController:
         """
         now = time.perf_counter()
         with self.lock:
+            self._last_ui_poll_time = now  # heartbeat for deadman watchdog
             session_start = self._session_start_time
-            max_sess      = self._max_session_s
-            elapsed_s     = (now - session_start) if session_start is not None else 0.0
+            max_sess = self._max_session_s
+            elapsed_s = (now - session_start) if session_start is not None else 0.0
             remaining_s: float | None = (
                 max(0.0, max_sess - elapsed_s)
-                if max_sess > 0 and session_start is not None else None
+                if max_sess > 0 and session_start is not None
+                else None
             )
             return {
-                "state":                  self.state.value,
-                "state_enum":             self.state,
-                "error_msg":              self.error_msg,
-                "position_um":            self.position_um,
-                "force_mN":               self.force_mN,
-                "speed_mm_s":             self.speed_mm_s,
-                "temperature_C":          self.temperature_C,
-                "voltage_mV":             self.voltage_mV,
-                "power_W":                self.power_W,
-                "errors_bitmask":         self.errors_bitmask,
-                "calibrated_length_um":   self.calibrated_length_um,
-                "max_feedback_force_mN":  self.max_feedback_force_mN,
-                "use_mock":               self.use_mock,
-                "simulation_reason":      self._simulation_reason,
-                "session_elapsed_s":      elapsed_s,
-                "session_remaining_s":    remaining_s,
-                "paused":                 self._paused,
-                "temp_warning":           _TEMP_WARNING_C <= self.temperature_C < _TEMP_ESTOP_C,
-                "current_pattern_name":   self._current_pattern_name,
-                "event_log":              list(self._event_log)[-30:],
+                "state": self.state.value,
+                "state_enum": self.state,
+                "error_msg": self.error_msg,
+                "position_um": self.position_um,
+                "force_mN": self.force_mN,
+                "speed_mm_s": self.speed_mm_s,
+                "temperature_C": self.temperature_C,
+                "voltage_mV": self.voltage_mV,
+                "power_W": self.power_W,
+                "errors_bitmask": self.errors_bitmask,
+                "calibrated_length_um": self.calibrated_length_um,
+                "max_feedback_force_mN": self.max_feedback_force_mN,
+                "use_mock": self.use_mock,
+                "simulation_reason": self._simulation_reason,
+                "session_elapsed_s": elapsed_s,
+                "session_remaining_s": remaining_s,
+                "paused": self._paused,
+                "soft_stopping": self._soft_stopping,
+                "temp_warning": self.config.temp_warning_c
+                <= self.temperature_C
+                < self.config.temp_estop_c,
+                "current_pattern_name": self._current_pattern_name,
+                "event_log": list(self._event_log)[-30:],
             }
 
     # ── Private helpers ───────────────────────────────────────────────────────
@@ -231,7 +269,7 @@ class MotorController:
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         self._event_log.append(f"[{ts}] {msg}")
 
-    def _set_motor_mode(self, mode) -> None:
+    def _set_motor_mode(self, mode: Any) -> None:
         """Sends a motor mode change command to the actuator, caching the state to avoid redundant calls."""
         if self._last_set_mode != mode:
             self.actuator.set_mode(mode)
@@ -246,13 +284,13 @@ class MotorController:
         if not self.actuator:
             return False
         try:
-            stream_data = self.actuator.get_stream_data()
+            stream_data: StreamDataProtocol = self.actuator.get_stream_data()
             with self.lock:
-                self.position_um    = stream_data.position
-                self.force_mN       = stream_data.force
-                self.power_W        = stream_data.power
-                self.temperature_C  = stream_data.temperature
-                self.voltage_mV     = stream_data.voltage
+                self.position_um = stream_data.position
+                self.force_mN = stream_data.force
+                self.power_W = stream_data.power
+                self.temperature_C = stream_data.temperature
+                self.voltage_mV = stream_data.voltage
                 self.errors_bitmask = stream_data.errors
             return True
         except Exception:
@@ -267,10 +305,10 @@ class MotorController:
         self.actuator.set_max_force(60000)
         self.actuator.write_register_blocking(_REG_POS_FILTER, 0)
         self.actuator.write_register_blocking(_REG_FORCE_FILTER, 0)
-        self.actuator.write_register_blocking(_REG_POS_MAX_VEL,   _INIT_MAX_VEL_MM_S)
-        self.actuator.write_register_blocking(_REG_POS_MAX_ACCEL, _INIT_MAX_ACCEL_MM_S2)
-        self.actuator.write_register_blocking(_REG_POS_MAX_DECEL, _INIT_MAX_ACCEL_MM_S2)
-        self.actuator.write_register_blocking(_REG_SOFTSTART_MS,  _INIT_SOFTSTART_MS)
+        self.actuator.write_register_blocking(_REG_POS_MAX_VEL, self.config.init_max_vel_mm_s)
+        self.actuator.write_register_blocking(_REG_POS_MAX_ACCEL, self.config.init_max_accel_mm_s2)
+        self.actuator.write_register_blocking(_REG_POS_MAX_DECEL, self.config.init_max_accel_mm_s2)
+        self.actuator.write_register_blocking(_REG_SOFTSTART_MS, self.config.init_softstart_ms)
         # pgain 200 mN/µm · igain 0 · dvgain 400 mN·s/m · sat 60000 mN
         self.actuator.tune_position_controller(pgain=200, igain=0, dvgain=400, sat=60000)
         gc.collect()
@@ -293,18 +331,19 @@ class MotorController:
 
         elapsed = now - self.pattern_start_time
         with self.lock:
-            speed     = self.speed_mm_s
-            cal_len   = self.calibrated_length_um
-            min_lim   = self.software_min_um
-            max_lim   = self.software_max_um
+            speed = self.speed_mm_s
+            cal_len = self.calibrated_length_um
+            min_lim = self.software_min_um
+            max_lim = self.software_max_um
             amp_scale = self._pattern_amplitude_scale
             max_force = self.max_feedback_force_mN
+            force_curr = self.force_mN
 
         # ── Bidirectional amplitude ramp ──────────────────────────────────────
         # _amplitude_target is the desired scale (1.0 = full, 0.0 = paused/stopping).
         # Ramp at 0.5/second (2-second full traverse) in both directions.
         amp_target = self._amplitude_target
-        step       = dt / 2.0
+        step = dt / 2.0
         if amp_scale < amp_target:
             amp_scale = min(amp_target, amp_scale + step)
         elif amp_scale > amp_target:
@@ -315,9 +354,9 @@ class MotorController:
         # ── Soft-stop completion ──────────────────────────────────────────────
         if self._soft_stopping and amp_scale <= 0.001:
             with self.lock:
-                self.state           = ControllerState.CALIBRATED_IDLE
+                self.state = ControllerState.CALIBRATED_IDLE
                 self.current_pattern = None
-            self._soft_stopping    = False
+            self._soft_stopping = False
             self._amplitude_target = 1.0
             with self.lock:
                 self._pattern_amplitude_scale = 0.0
@@ -328,16 +367,18 @@ class MotorController:
 
         # ── Smooth parameter interpolation at 500 Hz ──────────────────────────
         stroke_rate = 50000.0 * dt
-        freq_rate   = 1.0 * dt
+        freq_rate = 1.0 * dt
 
         s_curr = self._stroke_um_current
-        s_tgt  = self._stroke_um_target
+        s_tgt = self._stroke_um_target
         diff_s = s_tgt - s_curr
-        s_curr = s_tgt if abs(diff_s) <= stroke_rate else s_curr + math.copysign(stroke_rate, diff_s)
+        s_curr = (
+            s_tgt if abs(diff_s) <= stroke_rate else s_curr + math.copysign(stroke_rate, diff_s)
+        )
         self._stroke_um_current = s_curr
 
         f_curr = self._freq_hz_current
-        f_tgt  = self._freq_hz_target
+        f_tgt = self._freq_hz_target
         diff_f = f_tgt - f_curr
         f_curr = f_tgt if abs(diff_f) <= freq_rate else f_curr + math.copysign(freq_rate, diff_f)
         self._freq_hz_current = f_curr
@@ -345,33 +386,49 @@ class MotorController:
         # ── Phase integration ─────────────────────────────────────────────────
         # Freeze phase while fully paused so the waveform resumes from the same
         # point in its cycle rather than having drifted during the pause.
-        fully_paused = (amp_target <= 0.001 and amp_scale <= 0.001)
+        fully_paused = amp_target <= 0.001 and amp_scale <= 0.001
         if not fully_paused:
             self._current_phase += 2.0 * math.pi * f_curr * dt
 
         # ── Call pattern and send motor command ───────────────────────────────
         L = cal_len if cal_len > 0 else 150000.0
         res_mode, res_value = self.current_pattern(
-            elapsed, pos_um, speed, L,
-            stroke_length_um=s_curr, frequency_hz=f_curr,
-            _amplitude_scale=amp_scale, _phase=self._current_phase,
-            **self._extra_params
+            elapsed,
+            pos_um,
+            speed,
+            L,
+            stroke_length_um=s_curr,
+            frequency_hz=f_curr,
+            force_mN=force_curr,
+            _amplitude_scale=amp_scale,
+            _phase=self._current_phase,
+            **self._extra_params,
         )
+
+        # max/min do not propagate NaN — reject it before it reaches the motor.
+        if not math.isfinite(res_value):
+            self._trigger_estop(
+                f"Pattern '{self._current_pattern_name}' produced non-finite output "
+                f"({res_value!r}) — safety e-stop"
+            )
+            return
 
         if res_mode == "position":
             target_pos_um = max(min_lim, min(max_lim, res_value))
             # Rate-limit the commanded position so the motor never exceeds the
             # pattern's natural peak speed when approaching from a far position.
-            if self._commanded_pos_um is None:
-                self._commanded_pos_um = float(pos_um)
+            cmd_pos: float = (
+                self._commanded_pos_um if self._commanded_pos_um is not None else float(pos_um)
+            )
             max_step = self._max_pattern_speed_um_s * dt
-            diff = target_pos_um - self._commanded_pos_um
+            diff = target_pos_um - cmd_pos
             if abs(diff) <= max_step:
-                self._commanded_pos_um = target_pos_um
+                cmd_pos = target_pos_um
             else:
-                self._commanded_pos_um += math.copysign(max_step, diff)
+                cmd_pos += math.copysign(max_step, diff)
+            self._commanded_pos_um = cmd_pos
             self._set_motor_mode(self.sdk.MotorMode.PositionMode)
-            self.actuator.set_streamed_position_um(int(self._commanded_pos_um))
+            self.actuator.set_streamed_position_um(int(cmd_pos))
         elif res_mode == "force":
             clamped = max(-float(max_force), min(float(max_force), res_value))
             self._set_motor_mode(self.sdk.MotorMode.ForceMode)
@@ -385,28 +442,31 @@ class MotorController:
         with self.lock:
             pos_um = self.position_um
 
-        if self._calibration_target is None:
-            self._calibration_target = float(pos_um)
+        cal_target: float = (
+            self._calibration_target if self._calibration_target is not None else float(pos_um)
+        )
 
         if current_state == ControllerState.CALIBRATING_RETRACT:
-            self._calibration_target -= _CALIB_VEL_UM_S * dt
+            cal_target -= self.config.calib_vel_um_s * dt
         elif current_state == ControllerState.CALIBRATING_EXTEND:
-            self._calibration_target += _CALIB_VEL_UM_S * dt
+            cal_target += self.config.calib_vel_um_s * dt
         else:  # CALIBRATING_CENTER
             with self.lock:
                 center_target = self.calibrated_length_um / 2.0
-            step = _CALIB_VEL_UM_S * dt
-            diff = center_target - self._calibration_target
+            step = self.config.calib_vel_um_s * dt
+            diff = center_target - cal_target
             if abs(diff) <= step:
-                self._calibration_target = center_target
+                cal_target = center_target
             else:
-                self._calibration_target += math.copysign(step, diff)
+                cal_target += math.copysign(step, diff)
 
+        self._calibration_target = cal_target
         self._set_motor_mode(self.sdk.MotorMode.PositionMode)
-        self.actuator.set_streamed_position_um(int(self._calibration_target))
+        self.actuator.set_streamed_position_um(int(cal_target))
 
-    def _tick_500hz_controls(self, now: float, dt: float, current_state: ControllerState,
-                              is_estop: bool, pos_um: int) -> None:
+    def _tick_500hz_controls(
+        self, now: float, dt: float, current_state: ControllerState, is_estop: bool, pos_um: int
+    ) -> None:
         """Executes the high-frequency control loop tasks at 500 Hz.
 
         Triggers pattern movement calculation or advances calibration target ramps.
@@ -415,9 +475,11 @@ class MotorController:
             return
         if current_state == ControllerState.RUNNING:
             self._drive_running_pattern(now, dt, pos_um)
-        elif current_state in (ControllerState.CALIBRATING_RETRACT,
-                               ControllerState.CALIBRATING_EXTEND,
-                               ControllerState.CALIBRATING_CENTER):
+        elif current_state in (
+            ControllerState.CALIBRATING_RETRACT,
+            ControllerState.CALIBRATING_EXTEND,
+            ControllerState.CALIBRATING_CENTER,
+        ):
             self._drive_calibration(dt, current_state)
 
     def _drain_command_queue(self) -> None:
@@ -433,11 +495,18 @@ class MotorController:
     def _request_soft_stop(self) -> None:
         """Initiate a graceful ramp-to-zero stop (callable from the control thread)."""
         self._amplitude_target = 0.0
-        self._soft_stopping    = True
-        self._paused           = False
+        self._soft_stopping = True
+        self._paused = False
 
-    def _tick_20hz(self, now: float, dt_20hz: float, startup_time: float,
-                   current_state: ControllerState, is_estop: bool, prev_pos: int) -> int:
+    def _tick_20hz(
+        self,
+        now: float,
+        dt_20hz: float,
+        startup_time: float,
+        current_state: ControllerState,
+        is_estop: bool,
+        prev_pos: int,
+    ) -> int:
         """20 Hz block: safety monitoring, auto-shutoff, calibration state machine, GC.
 
         Returns the updated prev_pos for the next speed calculation.
@@ -445,19 +514,38 @@ class MotorController:
         # ── Session auto-shutoff ──────────────────────────────────────────────
         with self.lock:
             session_start = self._session_start_time
-        if (self._max_session_s > 0 and
-                session_start is not None and
-                not self._soft_stopping and
-                current_state == ControllerState.RUNNING and
-                (now - session_start) >= self._max_session_s):
+            last_ui_poll = self._last_ui_poll_time
+        if (
+            self._max_session_s > 0
+            and session_start is not None
+            and not self._soft_stopping
+            and current_state == ControllerState.RUNNING
+            and (now - session_start) >= self._max_session_s
+        ):
             mins = self._max_session_s // 60
             self._log_event(f"Session auto-stop ({mins} min limit reached)")
+            self._request_soft_stop()
+
+        # ── UI deadman — soft-stop if frontend goes silent while running ──────
+        # Protects against renderer crash or frozen UI leaving the motor running.
+        if (
+            current_state == ControllerState.RUNNING
+            and not self._soft_stopping
+            and last_ui_poll is not None
+            and (now - last_ui_poll) > self.config.ui_deadman_s
+        ):
+            self._log_event(
+                f"UI heartbeat lost ({self.config.ui_deadman_s:.0f}s) — safety soft-stop"
+            )
             self._request_soft_stop()
 
         # ── Connection health check ───────────────────────────────────────────
         if now - startup_time > 2.0:
             try:
-                if self.actuator.time_since_last_response_microseconds() > 500000:
+                if (
+                    self.actuator.time_since_last_response_microseconds()
+                    > self.config.comms_watchdog_us
+                ):
                     self._trigger_estop("Motor Connection Link Lost")
                     return prev_pos
             except Exception:
@@ -466,14 +554,14 @@ class MotorController:
         # ── Speed calculation ─────────────────────────────────────────────────
         with self.lock:
             self.speed_mm_s = ((self.position_um - prev_pos) / 1000.0) / dt_20hz
-            new_prev_pos    = self.position_um
+            new_prev_pos = self.position_um
 
         # ── Safety monitors ───────────────────────────────────────────────────
         with self.lock:
             current_force = abs(self.force_mN)
-            max_force     = self.max_feedback_force_mN
-            temp_C        = self.temperature_C
-            voltage_mV    = self.voltage_mV
+            max_force = self.max_feedback_force_mN
+            temp_C = self.temperature_C
+            voltage_mV = self.voltage_mV
 
         if not is_estop:
             # Force check: RUNNING and CALIBRATING_CENTER only.
@@ -494,23 +582,25 @@ class MotorController:
             else:
                 self._force_exceed_count = 0
 
-            if temp_C >= _TEMP_WARNING_C:
+            if temp_C >= self.config.temp_warning_c:
                 if not self._temp_warned:
                     self._temp_warned = True
-                    self._log_event(f"Temperature warning: {temp_C} °C (limit: {_TEMP_ESTOP_C} °C)")
+                    self._log_event(
+                        f"Temperature warning: {temp_C} °C (limit: {self.config.temp_estop_c} °C)"
+                    )
             else:
                 self._temp_warned = False
 
-            if temp_C >= _TEMP_ESTOP_C:
+            if temp_C >= self.config.temp_estop_c:
                 self._trigger_estop(
-                    f"Overtemperature Shutdown ({temp_C} °C ≥ {_TEMP_ESTOP_C} °C)"
+                    f"Overtemperature Shutdown ({temp_C} °C ≥ {self.config.temp_estop_c} °C)"
                 )
                 return new_prev_pos
 
-            if voltage_mV > 0 and voltage_mV < _VOLTAGE_LOW_MV:
+            if voltage_mV > 0 and voltage_mV < self.config.voltage_low_mv:
                 self._trigger_estop(
-                    f"Low Supply Voltage "
-                    f"({voltage_mV / 1000.0:.1f} V < {_VOLTAGE_LOW_MV / 1000.0:.1f} V)"
+                    f"Low Supply Voltage ({voltage_mV / 1000.0:.1f} V "
+                    f"< {self.config.voltage_low_mv / 1000.0:.1f} V)"
                 )
                 return new_prev_pos
 
@@ -520,20 +610,30 @@ class MotorController:
             return new_prev_pos
 
         # ── Calibration state machine ─────────────────────────────────────────
-        if current_state in (ControllerState.CALIBRATING_RETRACT,
-                             ControllerState.CALIBRATING_EXTEND):
+        if current_state in (
+            ControllerState.CALIBRATING_RETRACT,
+            ControllerState.CALIBRATING_EXTEND,
+        ):
             self._handle_calibration()
 
         elif current_state == ControllerState.CALIBRATING_CENTER:
             with self.lock:
                 cal_len_snap = self.calibrated_length_um
             center_done = cal_len_snap / 2.0
-            if (self._calibration_target is not None and
-                    abs(self._calibration_target - center_done) < 1.0):
+            if (
+                self._calibration_target is not None
+                and abs(self._calibration_target - center_done) < 1.0
+            ):
                 self._calibration_target = None
-                self.actuator.write_register_blocking(_REG_POS_MAX_VEL,   _INIT_MAX_VEL_MM_S)
-                self.actuator.write_register_blocking(_REG_POS_MAX_ACCEL, _INIT_MAX_ACCEL_MM_S2)
-                self.actuator.write_register_blocking(_REG_POS_MAX_DECEL, _INIT_MAX_ACCEL_MM_S2)
+                self.actuator.write_register_blocking(
+                    _REG_POS_MAX_VEL, self.config.init_max_vel_mm_s
+                )
+                self.actuator.write_register_blocking(
+                    _REG_POS_MAX_ACCEL, self.config.init_max_accel_mm_s2
+                )
+                self.actuator.write_register_blocking(
+                    _REG_POS_MAX_DECEL, self.config.init_max_accel_mm_s2
+                )
                 with self.lock:
                     self.state = ControllerState.CALIBRATED_IDLE
 
@@ -565,7 +665,7 @@ class MotorController:
         err = self.actuator.open_serial_port(self.port, self.baud)
         if err:
             with self.lock:
-                self.state     = ControllerState.ERROR
+                self.state = ControllerState.ERROR
                 self.error_msg = f"Failed to open port {self.port}: {err.what()}"
             return
 
@@ -576,16 +676,16 @@ class MotorController:
         with self.lock:
             self.state = ControllerState.CONNECTED
 
-        tick_interval       = 0.002
-        last_tick           = time.perf_counter()
-        startup_time        = time.perf_counter()
+        tick_interval = 0.002
+        last_tick = time.perf_counter()
+        startup_time = time.perf_counter()
         last_telemetry_time = 0.0
-        prev_pos            = 0
+        prev_pos = 0
 
         try:
             while not self.stop_event.is_set():
                 now = time.perf_counter()
-                dt  = now - last_tick
+                dt = now - last_tick
                 last_tick = now
 
                 self.actuator.run()
@@ -593,8 +693,8 @@ class MotorController:
 
                 with self.lock:
                     current_state = self.state
-                    is_estop      = (self.state == ControllerState.ESTOP)
-                    pos_um        = self.position_um
+                    is_estop = self.state == ControllerState.ESTOP
+                    pos_um = self.position_um
 
                 self._tick_500hz_controls(now, dt, current_state, is_estop, pos_um)
                 self._drain_command_queue()
@@ -603,34 +703,36 @@ class MotorController:
                 # changed it (e.g. soft-stop completion transitions to CALIBRATED_IDLE).
                 with self.lock:
                     current_state = self.state
-                    is_estop      = (self.state == ControllerState.ESTOP)
+                    is_estop = self.state == ControllerState.ESTOP
 
-                if now - last_telemetry_time >= _TELEMETRY_INTERVAL_S:
-                    dt_20hz             = now - last_telemetry_time
+                if now - last_telemetry_time >= self.config.telemetry_interval_s:
+                    dt_20hz = now - last_telemetry_time
                     last_telemetry_time = now
                     prev_pos = self._tick_20hz(
                         now, dt_20hz, startup_time, current_state, is_estop, prev_pos
                     )
 
                 elapsed_tick = time.perf_counter() - now
-                sleep_time   = tick_interval - elapsed_tick
+                sleep_time = tick_interval - elapsed_tick
                 if sleep_time > 0:
                     time.sleep(sleep_time)
         except Exception as e:
-            logger.exception("Unhandled exception in control loop — performing emergency cleanup: %s", e)
+            logger.exception(
+                "Unhandled exception in control loop — performing emergency cleanup: %s", e
+            )
             with self.lock:
-                self.state     = ControllerState.ERROR
+                self.state = ControllerState.ERROR
                 self.error_msg = f"Control loop crashed: {e}"
         finally:
             self._cleanup_on_stop()
 
-    def _process_command(self, cmd_type: str, kwargs: dict) -> None:
+    def _process_command(self, cmd_type: str, kwargs: dict[str, Any]) -> None:
         """Processes enqueued commands within the control thread.
 
         Handles commands for E-STOP triggers, safety limits, presets, pause/resume, and starting/stopping patterns.
         """
         with self.lock:
-            is_estop = (self.state == ControllerState.ESTOP)
+            is_estop = self.state == ControllerState.ESTOP
 
         if cmd_type == "estop":
             self._trigger_estop(kwargs.get("reason", "Emergency Stop Requested"))
@@ -651,7 +753,7 @@ class MotorController:
                     self.state = ControllerState.CALIBRATED_IDLE
                 else:
                     self.state = ControllerState.CONNECTED
-                self.error_msg             = ""
+                self.error_msg = ""
                 self._current_pattern_name = ""
             if cal_len > 0:
                 self._log_event("E-stop cleared — ready to run")
@@ -673,20 +775,20 @@ class MotorController:
             self._log_event("Calibration started")
             self._position_history.clear()
             self._calibration_stage_ticks = 0
-            self._calibration_target      = None
-            self._amplitude_target        = 1.0
-            self._soft_stopping           = False
-            self._paused                  = False
+            self._calibration_target = None
+            self._amplitude_target = 1.0
+            self._soft_stopping = False
+            self._paused = False
             with self.lock:
-                self._session_start_time   = None   # new calibration = new session
+                self._session_start_time = None  # new calibration = new session
                 self._current_pattern_name = ""
-                self.state                 = ControllerState.CALIBRATING_RETRACT
+                self.state = ControllerState.CALIBRATING_RETRACT
 
         elif cmd_type == "pause_pattern":
             with self.lock:
                 if self.state == ControllerState.RUNNING:
                     self._pre_pause_amplitude = self._amplitude_target
-                    self._paused              = True
+                    self._paused = True
             self._amplitude_target = 0.0
 
         elif cmd_type == "resume_pattern":
@@ -694,12 +796,12 @@ class MotorController:
                 if self.state == ControllerState.RUNNING:
                     self._paused = False
             self._amplitude_target = self._pre_pause_amplitude
-            self._soft_stopping    = False
+            self._soft_stopping = False
 
         elif cmd_type == "set_intensity":
             # Directly set the amplitude target (0.0–1.0) without affecting pause state.
             intensity = max(0.0, min(1.0, float(kwargs.get("intensity", 1.0))))
-            self._amplitude_target    = intensity
+            self._amplitude_target = intensity
             self._pre_pause_amplitude = intensity
             if intensity > 0.0:
                 with self.lock:
@@ -708,61 +810,66 @@ class MotorController:
 
         elif cmd_type == "soft_stop":
             with self.lock:
-                running = (self.state == ControllerState.RUNNING)
+                running = self.state == ControllerState.RUNNING
             if running:
                 self._log_event("Pattern stopped")
                 self._request_soft_stop()
 
         elif cmd_type == "start_pattern":
             pattern_func = kwargs.get("pattern_func")
-            params       = kwargs.get("params", {})
-            pname        = params.get("_pattern_name", "Unknown")
+            params = kwargs.get("params", {})
+            pname = params.get("_pattern_name", "Unknown")
             with self.lock:
-                already_running = (self.state == ControllerState.RUNNING and
-                                   self.current_pattern is not None)
+                already_running = (
+                    self.state == ControllerState.RUNNING and self.current_pattern is not None
+                )
                 if self.state in (ControllerState.CALIBRATED_IDLE, ControllerState.RUNNING):
                     # Update speed limit from caller-supplied peak velocity (with 10% headroom).
-                    raw_speed = params.get('_max_catch_up_speed_um_s', None)
+                    raw_speed = params.get("_max_catch_up_speed_um_s", None)
                     if raw_speed is None:
-                        s = params.get('stroke_length_um', self._stroke_um_target)
-                        f = params.get('frequency_hz', self._freq_hz_target)
+                        s = params.get("stroke_length_um", self._stroke_um_target)
+                        f = params.get("frequency_hz", self._freq_hz_target)
                         raw_speed = math.pi * f * (s / 2.0)
                     self._max_pattern_speed_um_s = max(5000.0, raw_speed * 1.10)
 
                     self._current_pattern_name = pname
                     if already_running:
-                        self.current_pattern   = pattern_func
-                        self.pattern_params    = params
-                        self._stroke_um_target = params.get('stroke_length_um', self._stroke_um_target)
-                        self._freq_hz_target   = params.get('frequency_hz', self._freq_hz_target)
-                        self._extra_params     = {k: v for k, v in params.items()
-                                                  if k not in _EXTRA_PARAMS_EXCLUDE}
-                        self.state             = ControllerState.RUNNING
+                        self.current_pattern = pattern_func
+                        self.pattern_params = params
+                        self._stroke_um_target = params.get(
+                            "stroke_length_um", self._stroke_um_target
+                        )
+                        self._freq_hz_target = params.get("frequency_hz", self._freq_hz_target)
+                        self._extra_params = {
+                            k: v for k, v in params.items() if k not in _EXTRA_PARAMS_EXCLUDE
+                        }
+                        self.state = ControllerState.RUNNING
                     else:
-                        self.current_pattern        = pattern_func
-                        self.pattern_params         = params
-                        new_stroke = params.get('stroke_length_um', 50000.0)
-                        new_freq   = params.get('frequency_hz', 1.0)
-                        self._stroke_um_target      = new_stroke
-                        self._stroke_um_current     = new_stroke
-                        self._freq_hz_target        = new_freq
-                        self._freq_hz_current       = new_freq
-                        self._extra_params          = {k: v for k, v in params.items()
-                                                       if k not in _EXTRA_PARAMS_EXCLUDE}
-                        self.pattern_start_time       = time.perf_counter()
+                        self.current_pattern = pattern_func
+                        self.pattern_params = params
+                        new_stroke = params.get("stroke_length_um", 50000.0)
+                        new_freq = params.get("frequency_hz", 1.0)
+                        self._stroke_um_target = new_stroke
+                        self._stroke_um_current = new_stroke
+                        self._freq_hz_target = new_freq
+                        self._freq_hz_current = new_freq
+                        self._extra_params = {
+                            k: v for k, v in params.items() if k not in _EXTRA_PARAMS_EXCLUDE
+                        }
+                        self.pattern_start_time = time.perf_counter()
                         self._pattern_amplitude_scale = 0.0
-                        self._current_phase           = 0.0
-                        self._commanded_pos_um        = None   # reinit from current position on next tick
-                        self.state                    = ControllerState.RUNNING
+                        self._current_phase = 0.0
+                        self._commanded_pos_um = None  # reinit from current position on next tick
+                        self.state = ControllerState.RUNNING
                     # Reset pause/stop state and set full amplitude for fresh/resumed play
-                    self._amplitude_target    = 1.0
+                    self._amplitude_target = 1.0
                     self._pre_pause_amplitude = 1.0
-                    self._soft_stopping       = False
-                    self._paused              = False
+                    self._soft_stopping = False
+                    self._paused = False
                     if self._session_start_time is None:
                         self._session_start_time = time.perf_counter()
-                    freq  = params.get('frequency_hz', 1.0)
-                    smm   = params.get('stroke_length_um', 50000.0) / 1000.0
+                    freq = params.get("frequency_hz", 1.0)
+                    smm = params.get("stroke_length_um", 50000.0) / 1000.0
                     action = "resumed" if already_running else "started"
                     self._log_event(f"Pattern {action}: {pname} @ {freq:.1f} Hz, {smm:.0f} mm")
 
@@ -770,12 +877,16 @@ class MotorController:
             with self.lock:
                 if self.state == ControllerState.RUNNING:
                     self.current_pattern = None
-                    self.state           = ControllerState.CALIBRATED_IDLE
-            self._amplitude_target    = 1.0
+                    self.state = ControllerState.CALIBRATED_IDLE
+            self._amplitude_target = 1.0
             self._pre_pause_amplitude = 1.0
-            self._soft_stopping       = False
-            self._paused              = False
+            self._soft_stopping = False
+            self._paused = False
             gc.collect()
+
+        elif cmd_type == "set_pattern_elapsed":
+            elapsed_s = float(kwargs.get("elapsed_s", 0.0))
+            self.pattern_start_time = time.perf_counter() - elapsed_s
 
     def _trigger_estop(self, reason: str) -> None:
         """Triggers an immediate Emergency Stop (E-STOP).
@@ -786,14 +897,14 @@ class MotorController:
         """
         self._log_event(f"E-STOP: {reason}")
         with self.lock:
-            self.state           = ControllerState.ESTOP
-            self.error_msg       = reason
+            self.state = ControllerState.ESTOP
+            self.error_msg = reason
             self.current_pattern = None
             # Do NOT clear _current_pattern_name here; useController.js reads it on the
             # RUNNING→ESTOP transition to populate session history.  It is cleared by
             # clear_estop so it does not persist into the next session.
-        self._soft_stopping    = False
-        self._paused           = False
+        self._soft_stopping = False
+        self._paused = False
         self._amplitude_target = 1.0
         if self.actuator:
             self._set_motor_mode(self.sdk.MotorMode.SleepMode)
@@ -804,16 +915,16 @@ class MotorController:
     def _handle_calibration(self) -> None:
         """Stall detection and stage transitions for the calibration state machine (20 Hz)."""
         with self.lock:
-            current_pos   = self.position_um
+            current_pos = self.position_um
             current_state = self.state
 
         self._calibration_stage_ticks += 1
         self._position_history.append(current_pos)
 
         stalled = (
-            self._calibration_stage_ticks > 30 and
-            len(self._position_history) == self._position_history.maxlen and
-            max(self._position_history) - min(self._position_history) < 400.0
+            self._calibration_stage_ticks > 30
+            and len(self._position_history) == self._position_history.maxlen
+            and max(self._position_history) - min(self._position_history) < 400.0
         )
 
         if current_state == ControllerState.CALIBRATING_RETRACT:
@@ -835,6 +946,6 @@ class MotorController:
                 self._log_event(f"Calibration complete: {current_pos // 1000} mm range")
                 with self.lock:
                     self.calibrated_length_um = current_pos
-                    self.software_min_um      = 5000
-                    self.software_max_um      = current_pos - 5000
-                    self.state                = ControllerState.CALIBRATING_CENTER
+                    self.software_min_um = 5000
+                    self.software_max_um = current_pos - 5000
+                    self.state = ControllerState.CALIBRATING_CENTER

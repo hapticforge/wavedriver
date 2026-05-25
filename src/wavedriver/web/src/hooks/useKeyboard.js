@@ -77,14 +77,7 @@ export function useKeyboard({
         return;
       }
 
-      // ── Pause / Resume (P) ────────────────────────────────────────────────
-      if (e.key === "p" || e.key === "P") {
-        e.preventDefault();
-        if (isRunning) {
-          sendCommand(tel.paused ? "resume_pattern" : "pause_pattern");
-        }
-        return;
-      }
+
 
       // ── Clear E-STOP (C) ──────────────────────────────────────────────────
       if (e.key === "c" || e.key === "C") {

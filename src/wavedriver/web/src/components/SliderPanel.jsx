@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Sliders, ChevronDown, ChevronRight, ShieldAlert } from 'lucide-react';
+import { Sliders, ChevronDown, ChevronRight, ShieldAlert, Sparkles } from 'lucide-react';
 
 function SliderRow({ title, value, display, min, max, step, onChange, onDecrement, onIncrement, extra }) {
   return (
@@ -79,6 +79,14 @@ export function SliderPanel({
   escalateDurationS, setEscalateDurationS,
   edgePeriodS, setEdgePeriodS,
   depthPeriodS, setDepthPeriodS,
+  adaptiveMode, setAdaptiveMode,
+  adaptiveSensitivity, setAdaptiveSensitivity,
+  shuffleEnabled, setShuffleEnabled,
+  shuffleDwellS, setShuffleDwellS,
+  shuffleMinFreq, setShuffleMinFreq,
+  shuffleMaxFreq, setShuffleMaxFreq,
+  shuffleMinStroke, setShuffleMinStroke,
+  shuffleMaxStroke, setShuffleMaxStroke,
   safetyForceN,
   maxSessionS, setMaxSessionS,
   calibratedLength,
@@ -87,6 +95,7 @@ export function SliderPanel({
   onMaxSessionChange,
 }) {
   const [safetyOpen, setSafetyOpen] = useState(false);
+  const [shuffleOpen, setShuffleOpen] = useState(false);
   const maxStrokeMm = calibratedLength > 0 ? Math.floor(calibratedLength / 1000) - 10 : 140;
   const sessionDisplay = maxSessionS === 0
     ? "Off"
@@ -167,6 +176,61 @@ export function SliderPanel({
           )}
         </div>
 
+        {/* Surprise / Shuffle bounds section */}
+        <div className="safety-section">
+          <button
+            className="safety-section-toggle"
+            onClick={() => setShuffleOpen(v => !v)}
+          >
+            <Sparkles size={13} />
+            <span>Surprise / Shuffle bounds</span>
+            <span className="safety-section-summary">
+              {shuffleEnabled ? "Active" : "Disabled"}
+            </span>
+            {shuffleOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          </button>
+          {shuffleOpen && (
+            <div className="safety-section-body">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                <input
+                  type="checkbox"
+                  id="surprise-active"
+                  checked={shuffleEnabled}
+                  onChange={(e) => setShuffleEnabled(e.target.checked)}
+                />
+                <label htmlFor="surprise-active" className="slider-title" style={{ cursor: 'pointer' }}>Enable Surprise Mode</label>
+              </div>
+              <SliderRow
+                title="Shuffle Dwell Time"
+                value={shuffleDwellS}
+                display={`${shuffleDwellS} s`}
+                min={10} max={300} step={10}
+                onChange={v => setShuffleDwellS(Math.round(v))}
+                onDecrement={() => setShuffleDwellS(s => Math.max(10, s - 10))}
+                onIncrement={() => setShuffleDwellS(s => Math.min(300, s + 10))}
+              />
+              <SliderRow
+                title="Min Speed Bounds"
+                value={shuffleMinFreq}
+                display={`${shuffleMinFreq.toFixed(1)} Hz`}
+                min={0.1} max={shuffleMaxFreq} step={0.1}
+                onChange={setShuffleMinFreq}
+                onDecrement={() => setShuffleMinFreq(f => Math.max(0.1, Math.round((f - 0.1) * 10) / 10))}
+                onIncrement={() => setShuffleMinFreq(f => Math.min(shuffleMaxFreq, Math.round((f + 0.1) * 10) / 10))}
+              />
+              <SliderRow
+                title="Max Speed Bounds"
+                value={shuffleMaxFreq}
+                display={`${shuffleMaxFreq.toFixed(1)} Hz`}
+                min={shuffleMinFreq} max={4.0} step={0.1}
+                onChange={setShuffleMaxFreq}
+                onDecrement={() => setShuffleMaxFreq(f => Math.max(shuffleMinFreq, Math.round((f - 0.1) * 10) / 10))}
+                onIncrement={() => setShuffleMaxFreq(f => Math.min(4.0, Math.round((f + 0.1) * 10) / 10))}
+              />
+            </div>
+          )}
+        </div>
+
         {/* Pattern-specific extra controls */}
         {patternName === "Realistic" && (
           <div className="slider-row">
@@ -186,6 +250,42 @@ export function SliderPanel({
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {patternName === "Adaptive" && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div className="slider-row">
+              <div className="slider-header">
+                <span className="slider-title">Adaptive Mode</span>
+                <span className="slider-value-display">{adaptiveMode === "ease" ? "Auto-Ease" : "Give & Take"}</span>
+              </div>
+              <div className="slider-body">
+                <button
+                  className={`btn ${adaptiveMode === 'ease' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ padding: '6px 12px', flex: 1 }}
+                  onClick={() => setAdaptiveMode('ease')}
+                >
+                  Auto-Ease
+                </button>
+                <button
+                  className={`btn ${adaptiveMode === 'give_and_take' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ padding: '6px 12px', flex: 1 }}
+                  onClick={() => setAdaptiveMode('give_and_take')}
+                >
+                  Give &amp; Take
+                </button>
+              </div>
+            </div>
+            <SliderRow
+              title="Force Sensitivity"
+              value={adaptiveSensitivity}
+              display={`${adaptiveSensitivity.toFixed(1)}x`}
+              min={0.5} max={3.0} step={0.1}
+              onChange={setAdaptiveSensitivity}
+              onDecrement={() => setAdaptiveSensitivity(s => Math.max(0.5, Math.round((s - 0.1) * 10) / 10))}
+              onIncrement={() => setAdaptiveSensitivity(s => Math.min(3.0, Math.round((s + 0.1) * 10) / 10))}
+            />
           </div>
         )}
 

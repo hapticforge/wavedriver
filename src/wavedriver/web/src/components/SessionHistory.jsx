@@ -1,4 +1,4 @@
-import { X } from 'lucide-react';
+import { X, Trash2 } from 'lucide-react';
 
 function formatDuration(seconds) {
   const m = Math.floor(seconds / 60);
@@ -18,15 +18,44 @@ function formatTimestamp(iso) {
   }
 }
 
-export function SessionHistory({ records, onClose }) {
+export function SessionHistory({ records, historyEnabled = true, onHistoryEnabledChange, onClearHistory, onClose }) {
+  const handleClear = () => {
+    if (window.confirm("Clear all session history? This cannot be undone.")) {
+      onClearHistory?.();
+    }
+  };
+
   return (
     <div className="activity-log-panel">
       <div className="activity-log-header">
         <span className="input-label" style={{ margin: 0 }}>Session History</span>
-        <button className="btn btn-secondary icon-btn" onClick={onClose}>
-          <X size={14} />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontSize: '11px', opacity: 0.7 }}>
+            <input
+              type="checkbox"
+              checked={historyEnabled}
+              onChange={(e) => onHistoryEnabledChange?.(e.target.checked)}
+            />
+            Record
+          </label>
+          <button
+            className="btn btn-secondary icon-btn"
+            onClick={handleClear}
+            title="Clear all history"
+            disabled={records.length === 0}
+          >
+            <Trash2 size={12} />
+          </button>
+          <button className="btn btn-secondary icon-btn" onClick={onClose}>
+            <X size={14} />
+          </button>
+        </div>
       </div>
+      {!historyEnabled && (
+        <div style={{ padding: '6px 12px', fontSize: '11px', color: 'var(--accent-yellow, #ffb74d)', background: 'rgba(255,183,77,0.08)' }}>
+          History recording is off — sessions will not be saved.
+        </div>
+      )}
       <div className="activity-log-body">
         {records.length === 0 ? (
           <span className="activity-log-empty">No sessions recorded yet</span>

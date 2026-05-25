@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
  * On API ready: loads session from disk, applies safety and session commands.
  * Auto-saves session to disk whenever relevant settings change.
  */
-export function useSettings({ apiReady, sendCommand }) {
+export function useSettings({ apiReady, sendCommand, setHistoryEnabled }) {
   const [patternName, setPatternName]         = useState("Wave");
   const [frequencyHz, setFrequencyHz]         = useState(0.5);
   const [strokeLengthMm, setStrokeLengthMm]   = useState(50.0);
@@ -15,13 +15,23 @@ export function useSettings({ apiReady, sendCommand }) {
   const [escalateDurationS, setEscalateDurationS] = useState(300.0);
   const [edgePeriodS, setEdgePeriodS]         = useState(60.0);
   const [depthPeriodS, setDepthPeriodS]       = useState(20.0);
+  const [adaptiveMode, setAdaptiveMode]       = useState("ease");
+  const [adaptiveSensitivity, setAdaptiveSensitivity] = useState(1.0);
   const [safetyForceN, setSafetyForceN]       = useState(55.0);
   const [maxSessionS, setMaxSessionS]         = useState(0);
   const [presets, setPresets]                 = useState(Array(5).fill(null));
   const [activePresetSlot, setActivePresetSlot] = useState(null);
   const [defaultPresetSlot, setDefaultPresetSlot] = useState(null);
+  
+  // Surprise / Shuffle mode config
+  const [historyEnabled, setHistoryEnabledState] = useState(true);
+
   const [shuffleEnabled, setShuffleEnabled]   = useState(false);
   const [shuffleDwellS, setShuffleDwellS]     = useState(60);
+  const [shuffleMinFreq, setShuffleMinFreq]   = useState(0.5);
+  const [shuffleMaxFreq, setShuffleMaxFreq]   = useState(2.0);
+  const [shuffleMinStroke, setShuffleMinStroke] = useState(30.0);
+  const [shuffleMaxStroke, setShuffleMaxStroke] = useState(90.0);
 
   // Load safety settings and presets on startup.
   // Motion parameters (pattern, frequency, stroke, etc.) are intentionally NOT
@@ -40,6 +50,10 @@ export function useSettings({ apiReady, sendCommand }) {
           if (session.max_session_s != null) {
             setMaxSessionS(session.max_session_s);
             sendCommand("set_max_session", { max_session_s: session.max_session_s });
+          }
+          if (session.history_enabled != null) {
+            setHistoryEnabledState(session.history_enabled);
+            setHistoryEnabled?.(session.history_enabled);
           }
         }
       } catch (e) {
@@ -61,14 +75,20 @@ export function useSettings({ apiReady, sendCommand }) {
     })();
   }, [apiReady, sendCommand]);
 
+  // Keep controller ref in sync with historyEnabled state
+  useEffect(() => {
+    setHistoryEnabled?.(historyEnabled);
+  }, [historyEnabled, setHistoryEnabled]);
+
   // Auto-save safety settings whenever they change
   useEffect(() => {
     if (!apiReady) return;
     window.pywebview?.api?.save_session({
-      safety_force_n: safetyForceN,
-      max_session_s:  maxSessionS,
+      safety_force_n:  safetyForceN,
+      max_session_s:   maxSessionS,
+      history_enabled: historyEnabled,
     });
-  }, [apiReady, safetyForceN, maxSessionS]);
+  }, [apiReady, safetyForceN, maxSessionS, historyEnabled]);
 
   const savePreset = useCallback((slotIdx, name) => {
     setPresets(prev => {
@@ -83,6 +103,8 @@ export function useSettings({ apiReady, sendCommand }) {
         escalate_duration_s: escalateDurationS,
         edge_period_s:       edgePeriodS,
         depth_period_s:      depthPeriodS,
+        adaptive_mode:       adaptiveMode,
+        adaptive_sensitivity: adaptiveSensitivity,
       };
       if (window.pywebview?.api) {
         const obj = {};
@@ -92,7 +114,7 @@ export function useSettings({ apiReady, sendCommand }) {
       return updated;
     });
     setActivePresetSlot(slotIdx);
-  }, [patternName, frequencyHz, strokeLengthMm, intensityPct, rodRatio, escalateDurationS, edgePeriodS, depthPeriodS]);
+  }, [patternName, frequencyHz, strokeLengthMm, intensityPct, rodRatio, escalateDurationS, edgePeriodS, depthPeriodS, adaptiveMode, adaptiveSensitivity]);
 
   const renamePreset = useCallback((slotIdx, name) => {
     setPresets(prev => {
@@ -128,6 +150,8 @@ export function useSettings({ apiReady, sendCommand }) {
     escalateDurationS, setEscalateDurationS,
     edgePeriodS,    setEdgePeriodS,
     depthPeriodS,   setDepthPeriodS,
+    adaptiveMode,   setAdaptiveMode,
+    adaptiveSensitivity, setAdaptiveSensitivity,
     safetyForceN,   setSafetyForceN,
     maxSessionS,    setMaxSessionS,
     presets,
@@ -136,7 +160,12 @@ export function useSettings({ apiReady, sendCommand }) {
     renamePreset,
     importPresets,
     defaultPresetSlot, setDefaultPresetSlot,
+    historyEnabled, setHistoryEnabled: setHistoryEnabledState,
     shuffleEnabled, setShuffleEnabled,
     shuffleDwellS,  setShuffleDwellS,
+    shuffleMinFreq, setShuffleMinFreq,
+    shuffleMaxFreq, setShuffleMaxFreq,
+    shuffleMinStroke, setShuffleMinStroke,
+    shuffleMaxStroke, setShuffleMaxStroke,
   };
 }

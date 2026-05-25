@@ -35,6 +35,7 @@ export function useController() {
   const [telemetry, setTelemetry] = useState(DEFAULT_TELEMETRY);
   const [calibratedLength, setCalibratedLength] = useState(0);
   const calibratedLengthRef = useRef(0);
+  const historyEnabledRef = useRef(true);
 
   // Detect pywebview API availability
   useEffect(() => {
@@ -72,7 +73,8 @@ export function useController() {
           prevStateRef.current = tel.state_enum;
           if (prevState === "RUNNING" &&
               tel.state_enum !== "RUNNING" &&
-              tel.session_elapsed_s > 5) {
+              tel.session_elapsed_s > 5 &&
+              historyEnabledRef.current) {
             window.pywebview?.api?.save_session_history({
               duration_s:      Math.round(tel.session_elapsed_s),
               pattern_name:    tel.current_pattern_name || "",
@@ -99,5 +101,9 @@ export function useController() {
     window.pywebview?.api?.send_command(cmd, args);
   }, []);
 
-  return { apiReady, telemetry, calibratedLength, sendCommand };
+  const setHistoryEnabled = useCallback((enabled) => {
+    historyEnabledRef.current = enabled;
+  }, []);
+
+  return { apiReady, telemetry, calibratedLength, sendCommand, setHistoryEnabled };
 }

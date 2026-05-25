@@ -111,35 +111,61 @@ export function ControlPanel({
       <div className="button-actions-row">
         {isRunning ? (
           <div className="button-inner-row">
-            <button className="btn btn-secondary" onClick={onPauseToggle} title={isPaused ? "Resume (P)" : "Pause (P)"}>
+            <button 
+              className="btn" 
+              style={{ height: '46px', fontSize: '0.95rem', fontWeight: '700', background: isPaused ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)', borderColor: isPaused ? 'rgba(16, 185, 129, 0.4)' : 'rgba(245, 158, 11, 0.4)', color: isPaused ? '#34d399' : '#fbbf24' }}
+              onClick={onPauseToggle} 
+              title={isPaused ? "Resume (P)" : "Pause (P)"}
+            >
               {isPaused
-                ? <><Play size={15} fill="currentColor" /> Resume</>
-                : <><Pause size={15} fill="currentColor" /> Pause</>}
+                ? <><Play size={16} fill="currentColor" style={{ marginRight: '6px' }} /> Resume</>
+                : <><Pause size={16} fill="currentColor" style={{ marginRight: '6px' }} /> Pause</>}
             </button>
-            <button className="btn btn-secondary" onClick={onStop}>
-              <Square size={15} fill="currentColor" /> Stop
+            <button 
+              className="btn" 
+              style={{ height: '46px', fontSize: '0.95rem', fontWeight: '700', background: 'rgba(239, 68, 68, 0.15)', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#f87171' }}
+              onClick={onStop}
+            >
+              <Square size={14} fill="currentColor" style={{ marginRight: '6px' }} /> Stop
             </button>
           </div>
         ) : (
-          <button className="btn btn-primary" onClick={onStart} title="Start (Enter)">
-            <Play size={16} fill="currentColor" /> Start Stimulation
+          <button 
+            className="btn btn-primary" 
+            style={{ height: '50px', fontSize: '1.05rem', fontWeight: '800', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', color: '#ffffff' }}
+            onClick={onStart} 
+            title="Start (Enter)"
+          >
+            <Play size={18} fill="currentColor" style={{ marginRight: '8px' }} /> Start Stimulation
           </button>
         )}
 
         {!isRunning && (
           <div className="button-inner-row">
-            <button className="btn btn-secondary" onClick={onStop}>
-              <Square size={16} fill="currentColor" /> Stop
+            <button 
+              className="btn btn-secondary" 
+              style={{ height: '42px', fontSize: '0.9rem', fontWeight: '600' }}
+              onClick={onStop}
+            >
+              <Square size={14} fill="currentColor" style={{ marginRight: '6px' }} /> Stop
             </button>
-            <button className="btn btn-secondary" onClick={onCalibrate}>
-              <RefreshCw size={16} /> Calibrate
+            <button 
+              className="btn btn-secondary" 
+              style={{ height: '42px', fontSize: '0.9rem', fontWeight: '600' }}
+              onClick={onCalibrate}
+            >
+              <RefreshCw size={14} style={{ marginRight: '6px' }} /> Calibrate
             </button>
           </div>
         )}
 
         {isRunning && (
-          <button className="btn btn-secondary" onClick={onCalibrate}>
-            <RefreshCw size={16} /> Calibrate
+          <button 
+            className="btn btn-secondary" 
+            style={{ height: '42px', fontSize: '0.9rem', fontWeight: '600' }}
+            onClick={onCalibrate}
+          >
+            <RefreshCw size={14} style={{ marginRight: '6px' }} /> Calibrate
           </button>
         )}
 

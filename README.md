@@ -1,129 +1,132 @@
 # Wavedriver
 
-Wavedriver is a high-performance, **PyWebView-based desktop dashboard controller** designed for reciprocating adult novelty and pleasure devices powered by the **Iris Dynamics Orca 6 Linear Motor**. 
+Desktop controller for the **Iris Dynamics Orca 6** linear actuator. Wavedriver provides a live graphical dashboard with 10 motion patterns, real-time force/position telemetry, session management, and multiple safety layers — all running locally with no cloud dependency.
 
-By leveraging the high-speed capability and direct force/position feedback of the Orca 6, Wavedriver provides a responsive graphical interface to design, trigger, and dynamically tune motion profiles (strokes, frequency, and safety limits) in real time.
-
----
-
-## Key Features
-
-- **Pleasure Waveform Kinematics**: Seven built-in movement profiles tailored for varying sensory and tactile stimulation.
-- **Decoupled Multi-Rate Architecture**: 
-  - **High-Frequency Control Loop (500 Hz)**: Ensures ultra-smooth, jitter-free position and force transitions.
-  - **Low-Frequency Monitoring Loop (20 Hz)**: Monitors telemetry, temperature, and supply voltage, preventing bus saturation and enforcing software safety boundaries.
-- **Full Preset System**: Five distinct slot directories to instantly save and recall custom speed, stroke, and pattern configurations.
-- **Offline Simulation Mode**: A built-in physical model simulator featuring mass physics, dry/viscous friction, and physical end-stop collisions for testing and demonstrations without requiring physical hardware.
-- **Auto-Shutoff Timer**: Enforces session limits to protect hardware against extended unattended runs.
+> **Privacy**: nothing leaves your device. See [PRIVACY.md](PRIVACY.md).
 
 ---
 
-## Pleasure Patterns
+## Quick start
 
-Wavedriver defines seven unique motion patterns in `src/wavedriver/patterns.py`:
+**Requirements**: Python 3.12+, `uv`, Node.js (for the initial build only).
 
-| Pattern | Description | Application |
-|---|---|---|
-| **Wave** | Smooth, steady, and predictable reciprocating motion. | Classic, uniform stimulation. |
-| **Realistic** | Simulates slider-crank kinematics to mimic natural reciprocating machinery movements. | Asymmetric, lifelike thrust feel. Customizable rod ratio (2.5x, 3.5x, 5.0x). |
-| **Thrust** | Features a slow, gradual retraction followed by a rapid, high-acceleration thrust. | Deep, rhythmic, and impact-oriented profiles. |
-| **Pulse** | Rapid bursts of four consecutive strokes followed by a rest pause at the center. | Rhythmic, high-intensity intervals followed by anticipation. |
-| **Tease** | Uses three incommensurable frequencies to produce highly irregular, unpredictable motions. | Varied, non-repetitive sensory stimulation. |
-| **Escalate** | Gradually ramps the movement amplitude from zero to full intensity over a custom duration (e.g. 5 minutes). | Long, gradual sensory build-up. |
-| **Edge** | Climbs steadily to peak intensity over a custom period, then drops sharply back to zero before repeating. | Designed specifically for edging training and endurance cycles. |
-
----
-
-## Getting Started
-
-### Prerequisites
-Wavedriver requires Python 3.12+ and uses the `uv` tool for fast dependency and environment management. Node.js is required to compile the Vite frontend assets.
-
-### Installation
-Clone the repository and install dependencies in a virtual environment:
 ```bash
-# Sync package dependencies (pywebview, PyQt6, pyserial, etc.)
+# 1. Install dependencies
 uv sync --all-extras
-```
 
-To install and build the frontend assets:
-```bash
-cd src/wavedriver/web
-npm install
-npm run build
-cd ../../..
-```
+# 2. Build the frontend (one-time)
+cd src/wavedriver/web && npm install && npm run build && cd ../../..
 
-### Running the Application
+# 3. Run — hardware mode
+uv run wavedriver --port /dev/ttyUSB0
 
-Using **`uv run`** shortcuts, you can start the application directly:
-
-#### 1. Hardware Mode (Real Device)
-Ensure your Orca 6 linear motor is connected via your RS-485 USB serial adapter (defaults to `/dev/ttyUSB0` at 19200 baud).
-```bash
-uv run wavedriver --port /dev/ttyUSB0 --baud 19200
-```
-
-#### 2. Mock Mode (Hardware-Free Simulation)
-To run and test the application offline using the integrated physics simulator:
-```bash
+# 3. Run — mock/simulation mode (no hardware needed)
 uv run wavedriver --mock
 ```
 
-#### 3. Listing Serial Ports
-To check available ports on your system:
-```bash
-uv run wavedriver --list-ports
-```
+Don't know your port? `uv run wavedriver --list-ports` will enumerate available serial ports. You can also select the port from the startup screen inside the app.
 
 ---
 
-## User Interface & Control Reference
+## Patterns
 
-The interface features a live **Telemetry Dashboard** (monitoring device state, position, safety resistance, speed, voltage, temperature, and session time), a **Visual Shaft Position Progress Bar**, and a **Control Command Section**.
-
-### Key Bindings
-
-| Key | Action | Description |
+| Pattern | What it feels like | Key parameter |
 |---|---|---|
-| **`Space`** | **EMERGENCY STOP** | Instantly drops the motor into Sleep Mode and commands 0 mN force. |
-| **`Z`** | **Calibrate / Zero** | Initiates homing calibration. Moves the shaft to both endpoints to determine stroke length. |
-| **`P`** | **Pause / Resume** | Pauses the active pattern using a smooth ramp-down to center, or resumes play. |
-| **`Up` / `Down`** | **Speed +/-** | Adjusts pattern cycle frequency between 0.1 Hz and 3.0 Hz in 0.1 Hz steps. |
-| **`Left` / `Right`** | **Stroke / Ratio +/-** | Adjusts stroke length (or changes the rod-ratio geometry if in *Realistic* mode). |
-| **`=` / `-`** | **Intensity +/-** | Changes overall movement amplitude scale by +/- 10% (from 10% to 100%). |
-| **`[` / `]`** | **Safety Force +/-** | Adjusts the feedback force threshold in Newtons (clamps hardware behavior). |
-| **`C`** | **Clear E-STOP** | Clears the error state (requires homing calibration before resuming). |
-| **`1` – `5`** | **Recall Preset** | Recalls saved speed, stroke, and pattern configuration from slots 1-5. |
-| **`Ctrl+1` – `Ctrl+5`** | **Save Preset** | Saves current settings into slot 1-5. Saved to disk automatically. |
+| **Wave** | Smooth, even, predictable | Frequency, stroke |
+| **Realistic** | Asymmetric — like a physical crank mechanism | Rod ratio (2.5 × / 3.5 × / 5.0 ×) |
+| **Thrust** | Slow pull, fast push, brief hold | Frequency, stroke |
+| **Pulse** | Rapid burst of 4 strokes, then a rest pause | Frequency, stroke |
+| **Tease** | Irregular — four incommensurable frequencies mixed | Frequency, stroke |
+| **Escalate** | Starts very slow, builds to full intensity over time | Duration (minutes) |
+| **Edge** | Climbs to peak then drops suddenly — repeating cycle | Cycle period |
+| **Depth** | Slowly oscillates between shallow and full depth | Depth period |
+| **Adaptive** | Reacts to live force feedback — eases when resistance rises | Sensitivity, mode |
+| **Funscript** | Follows a `.funscript` keyframe file in sync with video | Load via Video Sync panel |
 
 ---
 
-## Safety Systems
+## Controls
 
-To ensure safe personal use and prevent motor damage, Wavedriver implements software-level safety constraints:
-1. **Force Clamping**: The motor controller continuously monitors feedback resistance. If the force exceeds the configured safety limit (default 55 N, configurable down to 5 N) for more than three consecutive telemetry cycles, an emergency stop is triggered.
-2. **Thermal Cutoff**: If the motor coil temperature reaches or exceeds **75°C**, the software commands an immediate thermal shutdown.
-3. **Under-Voltage Stop**: Triggers shutdown if supply voltage sags below **18V** to protect driver electronics.
-4. **Endpoint Protection**: Stroke limits are automatically set to exclude the absolute end-zones (5 mm margin at each side) to prevent harsh metal-on-metal collisions during regular pattern operations.
-5. **Connection Watchdog**: Triggers an E-STOP if serial communications drop for more than 500 milliseconds.
+### Sliders
+
+- **Frequency** — cycles per second (0.1 – 3.0 Hz)
+- **Stroke** — travel distance relative to calibrated range
+- **Intensity** — master amplitude scale (10 – 100%)
+- **Safety Force** — e-stop threshold in Newtons (5 – 60 N)
+- **Session Timer** — auto-shutoff after N minutes (0 = off)
+
+### Keyboard shortcuts
+
+| Key | Action |
+|---|---|
+| `Enter` | Start pattern |
+| `Space` | Emergency stop |
+| `Z` | Calibrate |
+| `P` | Pause / Resume |
+| `C` | Clear e-stop |
+| `Q` | Quit |
+| `↑ / ↓` | Frequency ± 0.1 Hz |
+| `← / →` | Stroke ± 5 mm (or rod ratio in Realistic mode) |
+| `= / −` | Intensity ± 10% |
+| `] / [` | Safety force ± 5 N |
+| `T` | Tap tempo |
+| `1 – 5` | Recall preset |
+| `Ctrl+1 – 5` | Save preset |
+| `?` | Help overlay |
+
+### Presets
+
+Five save slots store pattern, frequency, stroke, intensity, and all pattern-specific parameters. Save with `Ctrl+[1-5]`, recall with `[1-5]` or by clicking the slot.
 
 ---
 
-## Technical Architecture
+## Safety
 
-- **`src/wavedriver/main.py`**: Handles CLI arguments parsing, configures initial safety bounds, initializes the motor controller, and launches the PyWebView GUI container pointing to the built assets.
-- **`src/wavedriver/motor_controller.py`**: Establishes serial connection, schedules background control loop ticks, manages state transitions, and streams position/force targets.
-- **`src/wavedriver/web/`**: Single-page React application for the web dashboard, providing real-time SVG indicators, slider parameter adjusters, slot saving, and keypress event maps.
-- **`src/wavedriver/patterns.py`**: Contains the mathematical generators for reciprocating position and force outputs.
-- **`src/wavedriver/mock_actuator.py`**: Simulates mass, friction, endpoint collisions, and PID position tracking.
+Wavedriver implements layered safety in software. The most important ones for day-to-day use:
+
+- **Force limit** (default 55 N): if the actuator encounters sustained resistance above the threshold for 150 ms, it stops. Adjust the Safety Force slider to suit your use.
+- **Deadman watchdog**: if the app freezes or the UI stops polling for 5 seconds while running, the motor stops automatically.
+- **Thermal cutoff**: warning at 65 °C, e-stop at 75 °C.
+- **Comms watchdog**: e-stop if the serial connection drops for more than 500 ms.
+- **Position limits**: soft limits set 5 mm inside the physical end-stops during calibration.
+
+After any e-stop, press **C** to clear it (and re-calibrate if prompted), or press **Z** to run a fresh calibration.
+
+See [SAFETY.md](SAFETY.md) for the full list of all 12 safety layers with code references and FMEA notes.
 
 ---
 
-## Testing
+## Troubleshooting
 
-To run the mathematical verification and driver simulation tests:
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
+---
+
+## For developers
+
+### Architecture
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for a description of the multi-rate control loop, state machine, and key design decisions.
+
+### Running tests
+
 ```bash
-uv run pytest
+uv run pytest          # backend (74 tests, no hardware required)
+
+cd src/wavedriver/web
+npm test -- --run      # frontend (Vitest)
 ```
-All unit tests are located in `tests/test_driver.py` and run offline without hardware dependencies.
+
+### Linting and type-checking
+
+```bash
+uv run ruff check src/
+uv run ruff format src/
+uv run mypy src/wavedriver/
+```
+
+Or via the justfile: `just lint`, `just typecheck`, `just test`.
+
+### Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Pre-commit hooks enforce ruff format, ruff check, and mypy on every commit.

@@ -9,7 +9,7 @@ const BUFFER = 200;  // 10 s at 20 Hz
  * Uses a canvas with devicePixelRatio scaling for sharp rendering.
  * Appends a sample each render tick (driven by the 20 Hz telemetry poll).
  */
-export function WaveformCanvas({ positionUm, calibratedLength, isRunning, isPaused }) {
+export function WaveformCanvas({ positionUm, calibratedLength, isRunning }) {
   const canvasRef = useRef(null);
   const bufRef    = useRef([]);
   const rafRef    = useRef(null);
@@ -27,10 +27,8 @@ export function WaveformCanvas({ positionUm, calibratedLength, isRunning, isPaus
       bufRef.current._cleared = false;
     }
 
-    if (!isPaused) {
-      bufRef.current.push(positionUm);
-      if (bufRef.current.length > BUFFER) bufRef.current.shift();
-    }
+    bufRef.current.push(positionUm);
+    if (bufRef.current.length > BUFFER) bufRef.current.shift();
 
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(() => {
@@ -81,7 +79,7 @@ export function WaveformCanvas({ positionUm, calibratedLength, isRunning, isPaus
     });
 
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [positionUm, calibratedLength, isRunning, isPaused]);
+  }, [positionUm, calibratedLength, isRunning]);
 
   // Clear buffer when transitioning from stopped → running
   useEffect(() => {
