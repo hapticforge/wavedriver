@@ -139,9 +139,10 @@ class TestSessionClamping(unittest.TestCase):
     """
 
     def _make_app(self, session_data: dict):
-        """Create a WavedriverApp pointed at a temp session file."""
-        from wavedriver import ui as ui_module
+        """Create a WebviewAPI pointed at a temp session file, loading and returning session dict as namespace."""
+        from wavedriver import main as main_module
         from wavedriver.motor_controller import MotorController
+        import types
 
         mc = MotorController(use_mock=True)
 
@@ -149,11 +150,12 @@ class TestSessionClamping(unittest.TestCase):
             json.dump(session_data, f)
             tmp_path = Path(f.name)
 
-        with patch.object(ui_module, "SESSION_FILE", tmp_path):
-            app = ui_module.WavedriverApp(controller=mc, safety_limit=55.0)
+        with patch.object(main_module, "SESSION_FILE", tmp_path):
+            api = main_module.WebviewAPI(controller=mc, initial_safety_limit_N=55.0)
+            session = api.load_session()
 
         tmp_path.unlink(missing_ok=True)
-        return app
+        return types.SimpleNamespace(**session)
 
     def test_frequency_clamped_low(self):
         app = self._make_app({"frequency_hz": -10.0})

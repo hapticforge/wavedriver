@@ -5,8 +5,11 @@ description = "Motor driver TUI for Iris Dynamics Orca 6 linear motor"
 requires-python = ">=3.12"
 dependencies = [
     "pyorcasdk>=1.1.0",
-    "textual>=0.80.0",
     "pyserial>=3.5",
+    "pywebview>=5.1.0",
+    "qtpy>=2.4.0",
+    "PyQt6>=6.1.0",
+    "PyQt6-WebEngine>=6.1.0",
 ]
 
 [project.scripts]

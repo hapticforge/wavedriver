@@ -1,8 +1,8 @@
 # Wavedriver
 
-Wavedriver is a high-performance, Textual-based Terminal User Interface (TUI) controller designed for reciprocating adult novelty and pleasure devices powered by the **Iris Dynamics Orca 6 Linear Motor**. 
+Wavedriver is a high-performance, **PyWebView-based desktop dashboard controller** designed for reciprocating adult novelty and pleasure devices powered by the **Iris Dynamics Orca 6 Linear Motor**. 
 
-By leveraging the high-speed capability and direct force/position feedback of the Orca 6, Wavedriver provides a responsive interface to design, trigger, and dynamically tune motion profiles (strokes, frequency, and safety limits) in real time.
+By leveraging the high-speed capability and direct force/position feedback of the Orca 6, Wavedriver provides a responsive graphical interface to design, trigger, and dynamically tune motion profiles (strokes, frequency, and safety limits) in real time.
 
 ---
 
@@ -37,40 +37,50 @@ Wavedriver defines seven unique motion patterns in `src/wavedriver/patterns.py`:
 ## Getting Started
 
 ### Prerequisites
-Wavedriver requires Python 3.12+ and uses the `uv` tool for fast dependency and environment management.
+Wavedriver requires Python 3.12+ and uses the `uv` tool for fast dependency and environment management. Node.js is required to compile the Vite frontend assets.
 
 ### Installation
 Clone the repository and install dependencies in a virtual environment:
 ```bash
-# Install package dependencies (textual, pyserial, etc.)
-uv sync
+# Sync package dependencies (pywebview, PyQt6, pyserial, etc.)
+uv sync --all-extras
+```
+
+To install and build the frontend assets:
+```bash
+cd src/wavedriver/web
+npm install
+npm run build
+cd ../../..
 ```
 
 ### Running the Application
 
+Using **`uv run`** shortcuts, you can start the application directly:
+
 #### 1. Hardware Mode (Real Device)
 Ensure your Orca 6 linear motor is connected via your RS-485 USB serial adapter (defaults to `/dev/ttyUSB0` at 19200 baud).
 ```bash
-./run.sh --port /dev/ttyUSB0 --baud 19200
+uv run wavedriver --port /dev/ttyUSB0 --baud 19200
 ```
 
 #### 2. Mock Mode (Hardware-Free Simulation)
 To run and test the application offline using the integrated physics simulator:
 ```bash
-./run_mock.sh
+uv run wavedriver --mock
 ```
 
 #### 3. Listing Serial Ports
 To check available ports on your system:
 ```bash
-./run.sh --list-ports
+uv run wavedriver --list-ports
 ```
 
 ---
 
 ## User Interface & Control Reference
 
-The interface is divided into a live **Telemetry Dashboard** (monitoring device state, position, safety resistance, speed SPM, voltage, temperature, and session time), a **Visual Shaft Position Progress Bar**, and a **Control Command Section**.
+The interface features a live **Telemetry Dashboard** (monitoring device state, position, safety resistance, speed, voltage, temperature, and session time), a **Visual Shaft Position Progress Bar**, and a **Control Command Section**.
 
 ### Key Bindings
 
@@ -83,11 +93,9 @@ The interface is divided into a live **Telemetry Dashboard** (monitoring device 
 | **`Left` / `Right`** | **Stroke / Ratio +/-** | Adjusts stroke length (or changes the rod-ratio geometry if in *Realistic* mode). |
 | **`=` / `-`** | **Intensity +/-** | Changes overall movement amplitude scale by +/- 10% (from 10% to 100%). |
 | **`[` / `]`** | **Safety Force +/-** | Adjusts the feedback force threshold in Newtons (clamps hardware behavior). |
-| **`D`** | **Toggle Debug** | Displays real-time motor electrical power (W), voltage (V), temperature (°C), and internal parameters. |
 | **`C`** | **Clear E-STOP** | Clears the error state (requires homing calibration before resuming). |
 | **`1` – `5`** | **Recall Preset** | Recalls saved speed, stroke, and pattern configuration from slots 1-5. |
 | **`Ctrl+1` – `Ctrl+5`** | **Save Preset** | Saves current settings into slot 1-5. Saved to disk automatically. |
-| **`Q`** | **Quit** | Exits the TUI app gracefully. |
 
 ---
 
@@ -104,17 +112,18 @@ To ensure safe personal use and prevent motor damage, Wavedriver implements soft
 
 ## Technical Architecture
 
-- **`src/wavedriver/main.py`**: Handles CLI arguments parsing, configures initial safety bounds, and coordinates the startup/shutdown sequence.
+- **`src/wavedriver/main.py`**: Handles CLI arguments parsing, configures initial safety bounds, initializes the motor controller, and launches the PyWebView GUI container pointing to the built assets.
 - **`src/wavedriver/motor_controller.py`**: Establishes serial connection, schedules background control loop ticks, manages state transitions, and streams position/force targets.
-- **`src/wavedriver/ui.py`**: Built on the Textual framework, implements custom widgets, handles screen rendering, key events dispatch, and manages JSON-based persistent states.
+- **`src/wavedriver/web/`**: Single-page React application for the web dashboard, providing real-time SVG indicators, slider parameter adjusters, slot saving, and keypress event maps.
 - **`src/wavedriver/patterns.py`**: Contains the mathematical generators for reciprocating position and force outputs.
 - **`src/wavedriver/mock_actuator.py`**: Simulates mass, friction, endpoint collisions, and PID position tracking.
 
 ---
 
 ## Testing
+
 To run the mathematical verification and driver simulation tests:
 ```bash
-./test.sh
+uv run pytest
 ```
 All unit tests are located in `tests/test_driver.py` and run offline without hardware dependencies.
