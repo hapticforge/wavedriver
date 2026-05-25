@@ -136,7 +136,6 @@ class WebviewAPI:
                 intensity_pct = max(10.0, min(100.0, float(data.get("intensity_pct", 50.0))))
                 escalate_duration_s = max(30.0, min(3600.0, float(data.get("escalate_duration_s", 300.0))))
                 edge_period_s = max(10.0, min(600.0, float(data.get("edge_period_s", 60.0))))
-                calibrated_length_um = int(data.get("calibrated_length_um", 0))
                 
                 return {
                     "pattern_name": pattern,
@@ -146,7 +145,6 @@ class WebviewAPI:
                     "intensity_pct": intensity_pct,
                     "escalate_duration_s": escalate_duration_s,
                     "edge_period_s": edge_period_s,
-                    "calibrated_length_um": calibrated_length_um,
                 }
         except Exception:
             pass
@@ -154,13 +152,12 @@ class WebviewAPI:
         # Fallback default configuration
         return {
             "pattern_name": "Wave",
-            "frequency_hz": 1.0,
+            "frequency_hz": 0.5,
             "stroke_length_mm": 50.0,
             "rod_ratio": 2.5,
             "intensity_pct": 50.0,
             "escalate_duration_s": 300.0,
             "edge_period_s": 60.0,
-            "calibrated_length_um": 0,
         }
 
     def save_session(self, session_data: dict) -> dict:
@@ -168,10 +165,8 @@ class WebviewAPI:
         try:
             SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
             
-            # Automatically mix in calibrated length from controller telemetry if not provided
-            if "calibrated_length_um" not in session_data:
-                tel = self.controller.get_telemetry()
-                session_data["calibrated_length_um"] = tel.get("calibrated_length_um", 0)
+            # Ensure calibrated_length_um is not saved to session file
+            session_data.pop("calibrated_length_um", None)
                 
             SESSION_FILE.write_text(json.dumps(session_data))
             return {"success": True}

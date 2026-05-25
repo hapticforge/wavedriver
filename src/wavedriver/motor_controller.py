@@ -581,15 +581,6 @@ class MotorController:
                 self._session_start_time = None   # new calibration = new session
                 self.state               = ControllerState.CALIBRATING_RETRACT
 
-        elif cmd_type == "load_calibration":
-            length_um = int(kwargs.get("calibrated_length_um", 0))
-            if length_um > 20000:
-                with self.lock:
-                    self.calibrated_length_um = length_um
-                    self.software_min_um      = 5000
-                    self.software_max_um      = length_um - 5000
-                    self.state                = ControllerState.CALIBRATED_IDLE
-
         elif cmd_type == "pause_pattern":
             with self.lock:
                 if self.state == ControllerState.RUNNING:

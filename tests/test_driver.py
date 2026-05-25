@@ -181,6 +181,32 @@ class TestSessionClamping(unittest.TestCase):
         app = self._make_app({"pattern_name": "Slider-Crank"})
         self.assertEqual(app.pattern_name, "Realistic")
 
+    def test_calibrated_length_ignored_and_not_restored(self):
+        app = self._make_app({"calibrated_length_um": 120000})
+        self.assertFalse(hasattr(app, "calibrated_length_um"))
+
+    def test_save_session_ignores_calibrated_length(self):
+        from wavedriver import main as main_module
+        from wavedriver.motor_controller import MotorController
+        
+        mc = MotorController(use_mock=True)
+        
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            tmp_path = Path(f.name)
+            
+        try:
+            with patch.object(main_module, "SESSION_FILE", tmp_path):
+                api = main_module.WebviewAPI(controller=mc, initial_safety_limit_N=55.0)
+                api.save_session({
+                    "pattern_name": "Wave",
+                    "calibrated_length_um": 120000
+                })
+                
+                saved_data = json.loads(tmp_path.read_text())
+                self.assertNotIn("calibrated_length_um", saved_data)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
 
 # ── Integration test (slow — requires mock calibration cycle) ─────────────────
 

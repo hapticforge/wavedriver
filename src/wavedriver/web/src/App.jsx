@@ -21,7 +21,7 @@ function App() {
   
   // Dashboard parameters state
   const [patternName, setPatternName] = useState("Wave");
-  const [frequencyHz, setFrequencyHz] = useState(1.0);
+  const [frequencyHz, setFrequencyHz] = useState(0.5);
   const [strokeLengthMm, setStrokeLengthMm] = useState(50.0);
   const [intensityPct, setIntensityPct] = useState(50.0);
   const [rodRatio, setRodRatio] = useState(2.5);
@@ -35,7 +35,6 @@ function App() {
   const [showDebug, setShowDebug] = useState(false);
   const [presets, setPresets] = useState(Array(5).fill(null));
   const [activePresetSlot, setActivePresetSlot] = useState(null);
-  const [hasSavedCal, setHasSavedCal] = useState(false);
   const [calibratedLengthUm, setCalibratedLengthUm] = useState(0);
 
   // Live Telemetry state
@@ -108,16 +107,10 @@ function App() {
       const session = await window.pywebview.api.load_session();
       if (session && Object.keys(session).length > 0) {
         if (session.pattern_name) setPatternName(session.pattern_name);
-        if (session.frequency_hz) setFrequencyHz(session.frequency_hz);
-        if (session.stroke_length_mm) setStrokeLengthMm(session.stroke_length_mm);
         if (session.intensity_pct) setIntensityPct(session.intensity_pct);
         if (session.rod_ratio) setRodRatio(session.rod_ratio);
         if (session.escalate_duration_s) setEscalateDurationS(session.escalate_duration_s);
         if (session.edge_period_s) setEdgePeriodS(session.edge_period_s);
-        if (session.calibrated_length_um) {
-          setCalibratedLengthUm(session.calibrated_length_um);
-          setHasSavedCal(session.calibrated_length_um > 0);
-        }
       }
 
       // Load presets
@@ -147,7 +140,6 @@ function App() {
           setTelemetry(tel);
           if (tel.calibrated_length_um > 0 && tel.calibrated_length_um !== calibratedLengthUm) {
             setCalibratedLengthUm(tel.calibrated_length_um);
-            setHasSavedCal(true);
           }
         }
       } catch (e) {
@@ -168,8 +160,7 @@ function App() {
       intensity_pct: stateRef.current.intensityPct,
       rod_ratio: stateRef.current.rodRatio,
       escalate_duration_s: stateRef.current.escalateDurationS,
-      edge_period_s: stateRef.current.edgePeriodS,
-      calibrated_length_um: stateRef.current.calibratedLengthUm
+      edge_period_s: stateRef.current.edgePeriodS
     };
     window.pywebview.api.save_session(data);
   };
@@ -179,7 +170,7 @@ function App() {
     if (apiReady) {
       saveSession();
     }
-  }, [patternName, frequencyHz, strokeLengthMm, intensityPct, rodRatio, escalateDurationS, edgePeriodS, calibratedLengthUm]);
+  }, [patternName, frequencyHz, strokeLengthMm, intensityPct, rodRatio, escalateDurationS, edgePeriodS]);
 
   // 5. Commands Helper
   const sendCommand = (cmd, args = {}) => {
@@ -226,13 +217,6 @@ function App() {
   const startCalibration = () => {
     setShowStartupModal(false);
     sendCommand("start_calibration");
-  };
-
-  const resumeSession = () => {
-    setShowStartupModal(false);
-    if (calibratedLengthUm > 0) {
-      sendCommand("load_calibration", { calibrated_length_um: calibratedLengthUm });
-    }
   };
 
   const quitApplication = () => {
@@ -638,6 +622,8 @@ function App() {
                 value={patternName}
                 onChange={(e) => {
                   setPatternName(e.target.value);
+                  setFrequencyHz(0.5);
+                  setStrokeLengthMm(50.0);
                   if (telemetry.state_enum === "RUNNING") {
                     // Small delay to ensure state updates
                     setTimeout(() => startPattern(), 0);
@@ -912,36 +898,16 @@ function App() {
         <div className="modal-overlay">
           <div className="modal-dialog">
             <h2 className="modal-title">Wavedriver Workspace Setup</h2>
-            {hasSavedCal ? (
-              <>
-                <p className="modal-body">
-                  A cached physical device calibration is saved and ready to load.
-                  <br /><br />
-                  Choose <strong>Resume Session</strong> to restore settings, or <strong>Recalibrate</strong> if you have remounted the Orca 6 motor.
-                </p>
-                <div className="modal-buttons">
-                  <button className="btn btn-primary" onClick={resumeSession}>
-                    Resume Session
-                  </button>
-                  <button className="btn btn-secondary" onClick={startCalibration}>
-                    Recalibrate Device
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="modal-body">
-                  Before starting stimulation patterns, Wavedriver must calibrate the physical workspace of the Orca 6 linear motor.
-                  <br /><br />
-                  The shaft will move slowly to both endpoints to determine the safe stroke length. Ensure the path is completely clear.
-                </p>
-                <div className="modal-buttons">
-                  <button className="btn btn-primary" onClick={startCalibration}>
-                    Set Up Device (Calibrate)
-                  </button>
-                </div>
-              </>
-            )}
+            <p className="modal-body">
+              Before starting stimulation patterns, Wavedriver must calibrate the physical workspace of the Orca 6 linear motor.
+              <br /><br />
+              The shaft will move slowly to both endpoints to determine the safe stroke length. Ensure the path is completely clear.
+            </p>
+            <div className="modal-buttons">
+              <button className="btn btn-primary" onClick={startCalibration}>
+                Set Up Device (Calibrate)
+              </button>
+            </div>
           </div>
         </div>
       )}
