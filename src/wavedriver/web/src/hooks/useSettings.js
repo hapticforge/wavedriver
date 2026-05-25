@@ -82,6 +82,7 @@ export function useSettings({ apiReady, sendCommand }) {
         rod_ratio:           rodRatio,
         escalate_duration_s: escalateDurationS,
         edge_period_s:       edgePeriodS,
+        depth_period_s:      depthPeriodS,
       };
       if (window.pywebview?.api) {
         const obj = {};
@@ -91,7 +92,7 @@ export function useSettings({ apiReady, sendCommand }) {
       return updated;
     });
     setActivePresetSlot(slotIdx);
-  }, [patternName, frequencyHz, strokeLengthMm, intensityPct, rodRatio, escalateDurationS, edgePeriodS]);
+  }, [patternName, frequencyHz, strokeLengthMm, intensityPct, rodRatio, escalateDurationS, edgePeriodS, depthPeriodS]);
 
   const renamePreset = useCallback((slotIdx, name) => {
     setPresets(prev => {

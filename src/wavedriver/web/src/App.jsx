@@ -120,21 +120,24 @@ function AppInner() {
     if (preset.rod_ratio           != null) setRodRatio(preset.rod_ratio);
     if (preset.escalate_duration_s != null) setEscalateDurationS(preset.escalate_duration_s);
     if (preset.edge_period_s       != null) setEdgePeriodS(preset.edge_period_s);
+    if (preset.depth_period_s      != null) setDepthPeriodS(preset.depth_period_s);
     if (telemetryRef.current.state_enum === "RUNNING") {
       startPattern({
-        patternName:      preset.pattern_name     || "Wave",
-        frequencyHz:      preset.frequency_hz     || 1.0,
-        strokeLengthMm:   preset.stroke_length_mm || 50.0,
-        rodRatio:         preset.rod_ratio        || 2.5,
+        patternName:      preset.pattern_name        || "Wave",
+        frequencyHz:      preset.frequency_hz        || 1.0,
+        strokeLengthMm:   preset.stroke_length_mm    || 50.0,
+        rodRatio:         preset.rod_ratio           || 2.5,
         escalateDurationS: preset.escalate_duration_s || 300.0,
-        edgePeriodS:      preset.edge_period_s    || 60.0,
+        edgePeriodS:      preset.edge_period_s       || 60.0,
+        depthPeriodS:     preset.depth_period_s      || 20.0,
       });
       if (preset.intensity_pct != null) {
         sendCommand("set_intensity", { intensity: preset.intensity_pct / 100.0 });
       }
     }
   }, [presets, setActivePresetSlot, setPatternName, setFrequencyHz, setStrokeLengthMm,
-      setIntensityPct, setRodRatio, setEscalateDurationS, setEdgePeriodS, startPattern, sendCommand]);
+      setIntensityPct, setRodRatio, setEscalateDurationS, setEdgePeriodS, setDepthPeriodS,
+      startPattern, sendCommand]);
 
   const handlePresetSave = useCallback((slotIdx) => {
     const name = window.prompt(
@@ -179,7 +182,8 @@ function AppInner() {
   useEffect(() => {
     const cur  = telemetry.state_enum;
     const prev = prevStateRef.current;
-    if (prev === "CALIBRATING" && cur === "CALIBRATED_IDLE") {
+    if (cur === "CALIBRATED_IDLE" &&
+        (prev === "CALIBRATING_CENTER" || prev === "CALIBRATING_EXTEND" || prev === "CALIBRATING_RETRACT")) {
       setToastMessage("Calibration complete — select a pattern and press Enter to start");
     }
     prevStateRef.current = cur;

@@ -208,23 +208,26 @@ export function useKeyboard({
         } else if (presets[slotIdx]) {
           const p = presets[slotIdx];
           setActivePresetSlot(slotIdx);
-          const pName   = p.pattern_name     || "Wave";
-          const pFreq   = p.frequency_hz     || 1.0;
-          const pStroke = p.stroke_length_mm || 50.0;
-          const pRatio  = p.rod_ratio        || 2.5;
+          const pName   = p.pattern_name        || "Wave";
+          const pFreq   = p.frequency_hz        || 1.0;
+          const pStroke = p.stroke_length_mm    || 50.0;
+          const pRatio  = p.rod_ratio           || 2.5;
           const pEsc    = p.escalate_duration_s || 300.0;
-          const pEdge   = p.edge_period_s    || 60.0;
-          const pInt    = p.intensity_pct    || 50.0;
+          const pEdge   = p.edge_period_s       || 60.0;
+          const pDepth  = p.depth_period_s      || 20.0;
+          const pInt    = p.intensity_pct       || 50.0;
           setFrequencyHz(pFreq);
           setStrokeLengthMm(pStroke);
           setRodRatio(pRatio);
           setEscalateDurationS(pEsc);
           setEdgePeriodS(pEdge);
+          setDepthPeriodS(pDepth);
           setIntensityPct(pInt);
           if (isRunning) {
             startPattern({
               patternName: pName, frequencyHz: pFreq, strokeLengthMm: pStroke,
               rodRatio: pRatio, escalateDurationS: pEsc, edgePeriodS: pEdge,
+              depthPeriodS: pDepth,
             });
             sendCommand("set_intensity", { intensity: pInt / 100.0 });
           }

@@ -202,7 +202,7 @@ class WebviewAPI:
             if SESSION_FILE.exists():
                 data = json.loads(SESSION_FILE.read_text())
                 return {
-                    "safety_force_n": max(5.0, min(60.0, float(data.get("safety_force_n", self.safety_limit_N)))),
+                    "safety_force_n": max(1.0, min(60.0, float(data.get("safety_force_n", self.safety_limit_N)))),
                     "max_session_s":  max(0, min(7200,   int(data.get("max_session_s", 0)))),
                 }
         except Exception:

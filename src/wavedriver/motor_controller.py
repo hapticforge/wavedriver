@@ -2,10 +2,13 @@ import gc
 import time
 import math
 import datetime
+import logging
 import threading
 import queue
 import collections
 from enum import Enum
+
+logger = logging.getLogger("wavedriver.controller")
 
 # ── Modbus register addresses ─────────────────────────────────────────────────
 _REG_FORCE_FILTER   = 175   # MB_FORCE_FILTER  (0 = no filter)
@@ -579,35 +582,47 @@ class MotorController:
         last_telemetry_time = 0.0
         prev_pos            = 0
 
-        while not self.stop_event.is_set():
-            now = time.perf_counter()
-            dt  = now - last_tick
-            last_tick = now
+        try:
+            while not self.stop_event.is_set():
+                now = time.perf_counter()
+                dt  = now - last_tick
+                last_tick = now
 
-            self.actuator.run()
-            self._update_telemetry()
+                self.actuator.run()
+                self._update_telemetry()
 
+                with self.lock:
+                    current_state = self.state
+                    is_estop      = (self.state == ControllerState.ESTOP)
+                    pos_um        = self.position_um
+
+                self._tick_500hz_controls(now, dt, current_state, is_estop, pos_um)
+                self._drain_command_queue()
+
+                # Re-read state after high-frequency controls and commands may have
+                # changed it (e.g. soft-stop completion transitions to CALIBRATED_IDLE).
+                with self.lock:
+                    current_state = self.state
+                    is_estop      = (self.state == ControllerState.ESTOP)
+
+                if now - last_telemetry_time >= _TELEMETRY_INTERVAL_S:
+                    dt_20hz             = now - last_telemetry_time
+                    last_telemetry_time = now
+                    prev_pos = self._tick_20hz(
+                        now, dt_20hz, startup_time, current_state, is_estop, prev_pos
+                    )
+
+                elapsed_tick = time.perf_counter() - now
+                sleep_time   = tick_interval - elapsed_tick
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+        except Exception as e:
+            logger.exception("Unhandled exception in control loop — performing emergency cleanup: %s", e)
             with self.lock:
-                current_state = self.state
-                is_estop      = (self.state == ControllerState.ESTOP)
-                pos_um        = self.position_um
-
-            self._tick_500hz_controls(now, dt, current_state, is_estop, pos_um)
-            self._drain_command_queue()
-
-            if now - last_telemetry_time >= _TELEMETRY_INTERVAL_S:
-                dt_20hz             = now - last_telemetry_time
-                last_telemetry_time = now
-                prev_pos = self._tick_20hz(
-                    now, dt_20hz, startup_time, current_state, is_estop, prev_pos
-                )
-
-            elapsed_tick = time.perf_counter() - now
-            sleep_time   = tick_interval - elapsed_tick
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-
-        self._cleanup_on_stop()
+                self.state     = ControllerState.ERROR
+                self.error_msg = f"Control loop crashed: {e}"
+        finally:
+            self._cleanup_on_stop()
 
     def _process_command(self, cmd_type: str, kwargs: dict) -> None:
         """Processes enqueued commands within the control thread.
@@ -624,10 +639,24 @@ class MotorController:
         if cmd_type == "clear_estop":
             if self.actuator:
                 self.actuator.clear_errors()
+                # Re-enable the stream that _trigger_estop shut down.
+                self.actuator.enable_stream()
             with self.lock:
-                self.state     = ControllerState.CALIBRATED_IDLE
-                self.error_msg = ""
-            self._log_event("E-stop cleared — ready to run")
+                cal_len = self.calibrated_length_um
+                # If calibration was never completed (e.g. E-STOP fired mid-calibration),
+                # drop back to CONNECTED so the user is forced to recalibrate before
+                # running.  This prevents pattern execution against an invalid position
+                # origin (software limits would be at their unvalidated constructor defaults).
+                if cal_len > 0:
+                    self.state = ControllerState.CALIBRATED_IDLE
+                else:
+                    self.state = ControllerState.CONNECTED
+                self.error_msg             = ""
+                self._current_pattern_name = ""
+            if cal_len > 0:
+                self._log_event("E-stop cleared — ready to run")
+            else:
+                self._log_event("E-stop cleared — calibration required before running")
             return
 
         if is_estop:
@@ -752,13 +781,17 @@ class MotorController:
         """Triggers an immediate Emergency Stop (E-STOP).
 
         Sets the controller state to ESTOP, clears active patterns, and places the motor in Sleep Mode.
+        The current pattern name is preserved until after telemetry is read so session history
+        can record which pattern was active when the safety event occurred.
         """
         self._log_event(f"E-STOP: {reason}")
         with self.lock:
-            self.state                = ControllerState.ESTOP
-            self.error_msg            = reason
-            self.current_pattern      = None
-            self._current_pattern_name = ""
+            self.state           = ControllerState.ESTOP
+            self.error_msg       = reason
+            self.current_pattern = None
+            # Do NOT clear _current_pattern_name here; useController.js reads it on the
+            # RUNNING→ESTOP transition to populate session history.  It is cleared by
+            # clear_estop so it does not persist into the next session.
         self._soft_stopping    = False
         self._paused           = False
         self._amplitude_target = 1.0
@@ -766,6 +799,7 @@ class MotorController:
             self._set_motor_mode(self.sdk.MotorMode.SleepMode)
             self.actuator.set_streamed_force_mN(0)
             self.actuator.run()
+            self.actuator.disable_stream()
 
     def _handle_calibration(self) -> None:
         """Stall detection and stage transitions for the calibration state machine (20 Hz)."""
