@@ -1,7 +1,7 @@
 [project]
 name = "wavedriver"
 version = "0.1.0"
-description = "Motor driver TUI for Iris Dynamics Orca 6 linear motor"
+description = "Web dashboard controller for Iris Dynamics Orca 6 linear motor"
 requires-python = ">=3.12"
 dependencies = [
     "pyorcasdk>=1.1.0",

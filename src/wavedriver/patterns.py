@@ -152,16 +152,16 @@ def pulse_pattern(t, position_um, speed_mm_s, L, stroke_length_um=100000, freque
         # Compress STROKES full sine cycles into the burst window
         val = C + A * math.sin(u / BURST_FRAC * STROKES * TWO_PI)
     else:
-        val = C  # rest at center
+        val = C + A * 0.25  # rest slightly extended — less mechanical than dead center
     return "position", val
 
 
 def tease_pattern(t, position_um, speed_mm_s, L, stroke_length_um=100000, frequency_hz=1.0,
                   _amplitude_scale=None, _phase=None, **kwargs):
-    """Irregular motion from three incommensurable frequencies — unpredictable and varied.
+    """Irregular motion from four incommensurable frequencies — unpredictable and varied.
 
-    Combines three out-of-phase sine wave generators (frequencies scaled by irrational multipliers 
-    like sqrt(2) and the Golden Ratio) to create a continuous, non-repetitive sensory pattern.
+    Combines four out-of-phase sine wave generators (scaled by √2, e, and φ−1) to create a
+    continuous, non-repetitive sensory pattern that remains fresh well past the 60-second mark.
 
     Args:
         t (float): Elapsed time in seconds.
@@ -179,9 +179,10 @@ def tease_pattern(t, position_um, speed_mm_s, L, stroke_length_um=100000, freque
     scale = _amplitude_scale if _amplitude_scale is not None else min(1.0, t / 2.0)
     C, A  = _base(L, stroke_length_um, scale)
     phase = _phase if _phase is not None else 2.0 * math.pi * frequency_hz * t
-    combined = (0.65 * math.sin(phase) +
-                0.25 * math.sin(1.41 * phase + 0.5) +
-                0.10 * math.sin(0.618 * phase + 1.2))
+    combined = (0.55 * math.sin(phase) +
+                0.25 * math.sin(1.41421 * phase + 0.5) +
+                0.12 * math.sin(2.71828 * phase + 2.3) +
+                0.08 * math.sin(0.61803 * phase + 1.2))
     # Clamp combined to [-1, 1] before scaling: irrational ratios can briefly
     # push the sum slightly outside this range, which would exceed stroke bounds.
     combined = max(-1.0, min(1.0, combined))
@@ -216,12 +217,63 @@ def escalate_pattern(t, position_um, speed_mm_s, L, stroke_length_um=100000, fre
     return "position", C + A * math.sin(phase)
 
 
+def depth_pattern(t, position_um, speed_mm_s, L, stroke_length_um=100000, frequency_hz=1.0,
+                  depth_period_s=20.0, _amplitude_scale=None, _phase=None, **kwargs):
+    """Sine carrier whose penetration depth slowly oscillates between shallow and full stroke.
+
+    The retracted (near) end stays fixed while the extended (far) end drifts between 35%
+    and 100% of the configured stroke over depth_period_s seconds, giving a continuous
+    sense of varying depth without any abrupt transitions.
+
+    The depth envelope is derived from the accumulated carrier phase (_phase) so it freezes
+    correctly on pause and advances smoothly across frequency changes.
+
+    Args:
+        t (float): Elapsed time in seconds.
+        position_um (int): Current motor position in micrometers.
+        speed_mm_s (float): Current motor speed in millimeters per second.
+        L (float): Calibrated total shaft stroke length in micrometers.
+        stroke_length_um (float): Maximum stroke length in micrometers.
+        frequency_hz (float): Carrier sine frequency in Hertz.
+        depth_period_s (float): Duration of one full shallow→deep→shallow cycle in seconds.
+        _amplitude_scale (float, optional): Dynamic scaling factor (0.0 to 1.0).
+        _phase (float, optional): Integrated phase angle.
+
+    Returns:
+        tuple[str, float]: Control mode ("position") and target position (µm).
+    """
+    scale = _amplitude_scale if _amplitude_scale is not None else min(1.0, t / 2.0)
+    C, A  = _base(L, stroke_length_um, scale)
+
+    # Depth envelope: slowly oscillates amplitude between 35% and 100% of A.
+    # Derived from carrier cycles so the envelope respects pause/resume phase freezing.
+    if _phase is not None:
+        carrier_cycles = _phase / (2.0 * math.pi)
+        slow_phase = 2.0 * math.pi * carrier_cycles / (max(1.0, depth_period_s) * max(0.01, frequency_hz))
+    else:
+        slow_phase = 2.0 * math.pi * t / max(1.0, depth_period_s)
+
+    depth_mod  = 0.675 + 0.325 * math.sin(slow_phase)   # oscillates [0.35, 1.00]
+    effective_A = A * depth_mod
+
+    # Fix the near end (retracted position) so only the far end changes depth.
+    # near_end = C - A  (constant),  center shifts so center - effective_A = near_end.
+    center = (C - A) + effective_A
+
+    phase = _phase if _phase is not None else 2.0 * math.pi * frequency_hz * t
+    return "position", center + effective_A * math.sin(phase)
+
+
 def edge_pattern(t, position_um, speed_mm_s, L, stroke_length_um=100000, frequency_hz=1.0,
                  edge_period_s=60.0, _amplitude_scale=None, _phase=None, **kwargs):
     """Ramps intensity to peak over 75% of edge_period_s, then drops sharply back to zero.
 
-    Designed for edging routines, providing repeating cycles of building intensity 
+    Designed for edging routines, providing repeating cycles of building intensity
     followed by a sudden drop to complete rest.
+
+    The edging envelope is derived from the accumulated carrier phase (_phase) rather than
+    wall-clock time, so the envelope position freezes correctly when the pattern is paused
+    and resumes exactly where it left off.
 
     Args:
         t (float): Elapsed time in seconds.
@@ -239,12 +291,22 @@ def edge_pattern(t, position_um, speed_mm_s, L, stroke_length_um=100000, frequen
     """
     scale  = _amplitude_scale if _amplitude_scale is not None else 1.0
     period = max(1.0, edge_period_s)
-    pos_in_cycle = (t % period) / period  # [0, 1)
     PEAK_FRAC = 0.75
-    if pos_in_cycle < PEAK_FRAC:
-        envelope = pos_in_cycle / PEAK_FRAC          # linear ramp up 0 → 1
+
+    if _phase is not None:
+        # Express the edge period in carrier cycles so the envelope follows _phase.
+        # edge_period_cycles = edge_period_s * frequency_hz (number of carrier cycles per edge cycle).
+        edge_period_cycles = period * max(0.01, frequency_hz)
+        carrier_cycles     = _phase / (2.0 * math.pi)
+        pos_in_cycle       = math.fmod(carrier_cycles, edge_period_cycles) / edge_period_cycles
     else:
-        envelope = 0.0                                # instant drop back to zero
+        pos_in_cycle = (t % period) / period
+
+    if pos_in_cycle < PEAK_FRAC:
+        envelope = pos_in_cycle / PEAK_FRAC   # linear ramp 0 → 1
+    else:
+        envelope = 0.0                         # instant drop back to zero
+
     C, A  = _base(L, stroke_length_um, scale * envelope)
     phase = _phase if _phase is not None else 2.0 * math.pi * frequency_hz * t
     return "position", C + A * math.sin(phase)
