@@ -29,8 +29,8 @@ export function Header({ telemetry, onToggleHelp, onToggleAdvanced, onQuit }) {
 
   return (
     <header className="app-header">
-      <div className="logo-container">
-        <Activity className="text-cyan animate-pulse" size={22} />
+      <div className="logo-container" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <img src="/logo.png" alt="Wavedriver Logo" style={{ width: '24px', height: '24px', borderRadius: '4px' }} />
         <h1 className="logo-title">WAVEDRIVER</h1>
       </div>
 
