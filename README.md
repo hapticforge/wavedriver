@@ -1,132 +1,119 @@
 # Wavedriver
 
-Desktop controller for the **Iris Dynamics Orca 6** linear actuator. Wavedriver provides a live graphical dashboard with 10 motion patterns, real-time force/position telemetry, session management, and multiple safety layers — all running locally with no cloud dependency.
+Wavedriver is a premium, privacy-first **sex machine controller** for the **Iris Dynamics Orca 6** linear actuator. It transforms the industrial-grade linear motor into a highly responsive, custom-tuned fucking machine with an interactive dashboard, 10 motion patterns, microphone-driven beat synchronization, and multiple hardware safety layers.
 
-> **Privacy**: nothing leaves your device. See [PRIVACY.md](PRIVACY.md).
+> 🔒 **Privacy-First**: Your sessions are your business. Wavedriver runs entirely offline—no cloud dependencies, no analytics, and no data leaving your machine. See [PRIVACY.md](PRIVACY.md).
 
 ---
 
-## Quick start
+## Key Features
 
-**Requirements**: Python 3.12+, `uv`, Node.js (for the initial build only).
+*   🛡️ **Safety Watchdogs**: Dedicated local safety layers monitor user-defined force limits, motor temperatures, and connectivity to immediately disarm the machine if boundaries are crossed.
+*   🌀 **10 Stimulation Patterns**: From smooth wave oscillations to randomized tease cycles and adaptive push-back force feedback.
+*   🎬 **Video Sync & Funscripts**: Load `.funscript` haptic telemetry files to synchronize the machine's thrusts in real-time with video playback.
+*   🎵 **Interactive Beat Sync**: Synchronize the stroke frequency automatically to the rhythm of any music, speech, or external audio captured via your microphone.
+*   ⌨️ **Quick-Key Play**: Complete keyboard shortcuts let you start, stop, recall presets, and adjust stroke depth or speed mid-session without needing a mouse.
+
+---
+
+## Getting Started
+
+### Requirements
+Ensure you have **Python 3.12+**, **Node.js** (for building the app interface), and the task runner **`just`** installed.
+
+### Setup and Launch in 3 Steps
+Open a terminal in the project directory and run the following:
 
 ```bash
 # 1. Install dependencies
 uv sync --all-extras
+npm install --prefix src/wavedriver/web
 
-# 2. Build the frontend (one-time)
-cd src/wavedriver/web && npm install && npm run build && cd ../../..
+# 2. Build the graphical interface (one-time)
+just build-web
 
-# 3. Run — hardware mode
-uv run wavedriver --port /dev/ttyUSB0
+# 3. Launch the application
+# For hardware control:
+just run
 
-# 3. Run — mock/simulation mode (no hardware needed)
-uv run wavedriver --mock
+# Or run in simulation/mock mode (no hardware connected):
+just run-mock
 ```
 
-Don't know your port? `uv run wavedriver --list-ports` will enumerate available serial ports. You can also select the port from the startup screen inside the app.
+---
+
+## Experience Patterns
+
+Wavedriver features 10 built-in motion profiles designed for diverse sensations:
+
+| Pattern | Sensation Profile | Tuning Parameter |
+| :--- | :--- | :--- |
+| **Wave** | Smooth, even, and predictable sinusoidal movement. | Frequency & stroke length |
+| **Realistic** | Asymmetric stroke modeling a physical crank mechanism. | Rod ratio (2.5x, 3.5x, 5.0x) |
+| **Thrust** | Fast forward stroke, slow retraction, and a brief hold. | Frequency & stroke length |
+| **Pulse** | Rapid burst of 4 strokes followed by a rhythmic rest pause. | Frequency & stroke length |
+| **Tease** | Playful, irregular frequency shifts using mixed waves. | Frequency & stroke length |
+| **Escalate** | Starts at a gentle speed and builds intensity over time. | Duration (minutes) |
+| **Edge** | Climbs to a high intensity and drops down in repeating cycles. | Cycle period (seconds) |
+| **Depth** | Continuously shifts between shallow and deep strokes. | Depth period (seconds) |
+| **Adaptive** | Eases back when physical resistance rises, reacting to force. | Force sensitivity & mode |
+| **Funscript** | Keyframe-by-keyframe hardware synchronization with video. | Load via the Video Sync panel |
 
 ---
 
-## Patterns
+## Desktop Controls & Shortcuts
 
-| Pattern | What it feels like | Key parameter |
-|---|---|---|
-| **Wave** | Smooth, even, predictable | Frequency, stroke |
-| **Realistic** | Asymmetric — like a physical crank mechanism | Rod ratio (2.5 × / 3.5 × / 5.0 ×) |
-| **Thrust** | Slow pull, fast push, brief hold | Frequency, stroke |
-| **Pulse** | Rapid burst of 4 strokes, then a rest pause | Frequency, stroke |
-| **Tease** | Irregular — four incommensurable frequencies mixed | Frequency, stroke |
-| **Escalate** | Starts very slow, builds to full intensity over time | Duration (minutes) |
-| **Edge** | Climbs to peak then drops suddenly — repeating cycle | Cycle period |
-| **Depth** | Slowly oscillates between shallow and full depth | Depth period |
-| **Adaptive** | Reacts to live force feedback — eases when resistance rises | Sensitivity, mode |
-| **Funscript** | Follows a `.funscript` keyframe file in sync with video | Load via Video Sync panel |
+You can control everything on the screen with these interactive dashboard options or physical hotkeys:
 
----
+### Parameter Controls
+*   **Speed / Frequency** (Disabled in video/audio sync): Adjusts cycles per second (0.1 – 4.0 Hz / 6 – 240 BPM).
+*   **Stroke Length**: Sets the physical travel distance of the rod relative to calibrated safety boundaries.
+*   **Intensity**: Master amplitude multiplier scaling the overall strength (10 – 100%).
+*   **Safety Force Limit**: Restricts maximum force in Newtons (5 – 60 N). E-stops if exceeded.
+*   **Session Timer**: Automatically shuts off the pattern after a set time (1 – 120 minutes, 0 = off).
 
-## Controls
+### Hotkey Directory
 
-### Sliders
-
-- **Frequency** — cycles per second (0.1 – 3.0 Hz)
-- **Stroke** — travel distance relative to calibrated range
-- **Intensity** — master amplitude scale (10 – 100%)
-- **Safety Force** — e-stop threshold in Newtons (5 – 60 N)
-- **Session Timer** — auto-shutoff after N minutes (0 = off)
-
-### Keyboard shortcuts
-
-| Key | Action |
-|---|---|
+| Hotkey | Action |
+| :--- | :--- |
 | `Enter` | Start pattern |
-| `Space` | Emergency stop |
-| `Z` | Calibrate |
-| `P` | Pause / Resume |
-| `C` | Clear e-stop |
-| `Q` | Quit |
-| `↑ / ↓` | Frequency ± 0.1 Hz |
-| `← / →` | Stroke ± 5 mm (or rod ratio in Realistic mode) |
-| `= / −` | Intensity ± 10% |
-| `] / [` | Safety force ± 5 N |
-| `T` | Tap tempo |
-| `1 – 5` | Recall preset |
-| `Ctrl+1 – 5` | Save preset |
-| `?` | Help overlay |
-
-### Presets
-
-Five save slots store pattern, frequency, stroke, intensity, and all pattern-specific parameters. Save with `Ctrl+[1-5]`, recall with `[1-5]` or by clicking the slot.
+| `Space` | Emergency stop (E-Stop) |
+| `Z` | Re-calibrate endpoints |
+| `P` | Pause / Resume current motion |
+| `C` | Clear active E-Stop status |
+| `Q` | Quit Wavedriver |
+| `↑` / `↓` | Adjust Speed ± 0.1 Hz |
+| `←` / `→` | Adjust Stroke ± 5 mm (or Rod Ratio in Realistic mode) |
+| `=` / `−` | Adjust Intensity ± 10% |
+| `]` / `[` | Adjust Safety Force ± 5 N |
+| `T` | Tap Tempo (Tap 6 times to set manual BPM) |
+| `1` – `5` | Recall Preset 1–5 |
+| `Ctrl+1` – `5` | Save current settings to Preset slot 1–5 |
+| `?` | Toggle keybind overlay |
 
 ---
 
-## Safety
+## Built-In Safety Layers
 
-Wavedriver implements layered safety in software. The most important ones for day-to-day use:
+Wavedriver runs 12 software-level safety watchdogs locally on the controller loop:
+*   **Force Boundary (E-Stop)**: If the actuator encounters resistance above your Safety Force limit for more than 150 ms, it immediately disarms.
+*   **Active Watchdog**: If the frontend crashes or stops responding for 5 seconds while running, the motor instantly shuts down.
+*   **Thermal Protection**: Generates an interface warning at 65°C, and triggers a hard E-Stop at 75°C.
+*   **Comms Watchdog**: Disarms the motor if connection status over the serial link drops for more than 500 ms.
+*   **Endstop Guard**: Soft limits are configured 5 mm inside physical endstops during startup calibration.
 
-- **Force limit** (default 55 N): if the actuator encounters sustained resistance above the threshold for 150 ms, it stops. Adjust the Safety Force slider to suit your use.
-- **Deadman watchdog**: if the app freezes or the UI stops polling for 5 seconds while running, the motor stops automatically.
-- **Thermal cutoff**: warning at 65 °C, e-stop at 75 °C.
-- **Comms watchdog**: e-stop if the serial connection drops for more than 500 ms.
-- **Position limits**: soft limits set 5 mm inside the physical end-stops during calibration.
+*To reset an E-Stop, press **C** in the app to clear it (or press **Z** to run a fresh calibration if requested).*
 
-After any e-stop, press **C** to clear it (and re-calibrate if prompted), or press **Z** to run a fresh calibration.
-
-See [SAFETY.md](SAFETY.md) for the full list of all 12 safety layers with code references and FMEA notes.
-
----
-
-## Troubleshooting
-
-See [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+For detailed technical analysis of the safety architecture, see [SAFETY.md](SAFETY.md).
 
 ---
 
-## For developers
+## Technical Resources
 
-### Architecture
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for a description of the multi-rate control loop, state machine, and key design decisions.
-
-### Running tests
-
-```bash
-uv run pytest          # backend (74 tests, no hardware required)
-
-cd src/wavedriver/web
-npm test -- --run      # frontend (Vitest)
-```
-
-### Linting and type-checking
-
-```bash
-uv run ruff check src/
-uv run ruff format src/
-uv run mypy src/wavedriver/
-```
-
-Or via the justfile: `just lint`, `just typecheck`, `just test`.
-
-### Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). Pre-commit hooks enforce ruff format, ruff check, and mypy on every commit.
+If you are a developer looking to build or contribute to the project:
+*   **Architecture**: Read [ARCHITECTURE.md](ARCHITECTURE.md) to understand the multi-rate control loops and telemetry engine.
+*   **Development Commands**:
+    *   **Formatting & Linting**: Run `just lint` and `just typecheck` to analyze styles and types.
+    *   **Testing**: Run `just test` to execute backend Python test suites. Frontend unit tests can be run via `npm test --prefix src/wavedriver/web`.
+*   **Troubleshooting**: Visit [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for help with installation, hardware communication, and connection issues.
+*   **Contributing Guidelines**: Review [CONTRIBUTING.md](CONTRIBUTING.md).
