@@ -4,7 +4,7 @@
   <img src="logo.png" alt="Wavedriver Logo" width="200" height="200" />
 </p>
 
-Wavedriver is a premium, privacy-first **sex machine controller** for the **Iris Dynamics Orca 6** linear actuator. It transforms the industrial-grade linear motor into a highly responsive, custom-tuned fucking machine with an interactive dashboard, 10 motion patterns, microphone-driven beat synchronization, and multiple hardware safety layers.
+Wavedriver is a premium, privacy-first **sex machine controller** for the **Iris Dynamics Orca 6** linear actuator. It transforms the industrial-grade linear motor into a highly responsive, custom-tuned sex machine with an interactive dashboard, 10 motion patterns, microphone-driven beat synchronization, and multiple hardware safety layers.
 
 > 🔒 **Privacy-First**: Your sessions are your business. Wavedriver runs entirely offline—no cloud dependencies, no analytics, and no data leaving your machine. See [PRIVACY.md](PRIVACY.md).
 
