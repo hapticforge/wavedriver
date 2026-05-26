@@ -4,7 +4,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch, ANY
+from unittest.mock import ANY, patch
 
 from wavedriver import main as main_module
 from wavedriver import patterns
@@ -234,7 +234,18 @@ class TestPatternPeakSpeed(unittest.TestCase):
                 self.assertAlmostEqual(speed, expected, delta=1.0)
 
     def test_all_registry_entries_present(self):
-        expected = {"Wave", "Realistic", "Thrust", "Pulse", "Tease", "Escalate", "Edge", "Depth", "Adaptive", "Funscript"}
+        expected = {
+            "Wave",
+            "Realistic",
+            "Thrust",
+            "Pulse",
+            "Tease",
+            "Escalate",
+            "Edge",
+            "Depth",
+            "Adaptive",
+            "Funscript",
+        }
         self.assertEqual(set(PATTERN_REGISTRY.keys()), expected)
 
 
@@ -477,7 +488,9 @@ class TestCrashHandling(unittest.TestCase):
         mc.start(port="mock", baud=115200)
 
         connected = _wait_connected(mc, timeout=3.0)
-        self.assertTrue(connected, "Controller did not reach connected state before crash injection")
+        self.assertTrue(
+            connected, "Controller did not reach connected state before crash injection"
+        )
 
         # Replace _update_telemetry with a version that raises immediately.
         # patch.object on an instance sets mc.__dict__['_update_telemetry'] so
@@ -773,6 +786,7 @@ class TestStorageEdgeCases(unittest.TestCase):
 
     def test_read_json_os_error(self):
         from unittest.mock import patch
+
         storage = Storage(config_dir=Path("/nonexistent/path/here"))
         with patch.object(Path, "read_text", side_effect=OSError("Access denied")):
             data = storage._read_json(storage.session_file)
@@ -780,11 +794,12 @@ class TestStorageEdgeCases(unittest.TestCase):
 
     def test_corrupt_json_backup_failure(self):
         from unittest.mock import patch
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             storage = Storage(config_dir=Path(tmp_dir))
             # Write bad JSON
             storage.session_file.write_text("invalid json {", encoding="utf-8")
-            
+
             # Mock rename to raise OSError
             with patch.object(Path, "rename", side_effect=OSError("Rename failed")):
                 data = storage.load_presets()
@@ -803,6 +818,7 @@ class TestStorageEdgeCases(unittest.TestCase):
 
     def test_append_and_load_history_os_error(self):
         from unittest.mock import patch
+
         storage = Storage(config_dir=Path("/invalid/path"))
         # Verify load_history recovers from OSError gracefully
         with patch.object(Path, "exists", return_value=True):
@@ -815,9 +831,9 @@ class TestStorageEdgeCases(unittest.TestCase):
             # Write a mix of valid JSON, empty line, and malformed JSON
             lines = [
                 '{"duration_s": 10, "pattern_name": "Wave", "end_state": "CALIBRATED_IDLE"}',
-                '',
-                'malformed json',
-                '{"duration_s": 20, "pattern_name": "Pulse", "end_state": "CALIBRATED_IDLE"}'
+                "",
+                "malformed json",
+                '{"duration_s": 20, "pattern_name": "Pulse", "end_state": "CALIBRATED_IDLE"}',
             ]
             storage.history_file.write_text("\n".join(lines), encoding="utf-8")
             history = storage.load_history(limit=5)
@@ -832,7 +848,9 @@ class TestWebviewAPIEdgeCases(unittest.TestCase):
     def setUp(self):
         self.mc = MotorController(use_mock=True)
         self.storage = Storage(config_dir=Path("/nonexistent"))
-        self.api = main_module.WebviewAPI(self.mc, initial_safety_limit_N=55.0, storage=self.storage)
+        self.api = main_module.WebviewAPI(
+            self.mc, initial_safety_limit_N=55.0, storage=self.storage
+        )
 
     def tearDown(self):
         self.mc.stop()
@@ -844,6 +862,7 @@ class TestWebviewAPIEdgeCases(unittest.TestCase):
 
     def test_quit_application_with_mock_window(self):
         from unittest.mock import MagicMock
+
         window = MagicMock()
         self.api.set_window(window)
         res = self.api.quit_application()
@@ -852,7 +871,10 @@ class TestWebviewAPIEdgeCases(unittest.TestCase):
 
     def test_get_telemetry_raises_exception(self):
         from unittest.mock import patch
-        with patch.object(self.mc, "get_telemetry", side_effect=ValueError("Unexpected internal state")):
+
+        with patch.object(
+            self.mc, "get_telemetry", side_effect=ValueError("Unexpected internal state")
+        ):
             res = self.api.get_telemetry()
             self.assertIn("error", res)
             self.assertEqual(res["error"], "Unexpected internal state")
@@ -865,7 +887,10 @@ class TestWebviewAPIEdgeCases(unittest.TestCase):
 
     def test_send_command_exception(self):
         from unittest.mock import patch
-        with patch.object(self.mc, "send_command", side_effect=RuntimeError("Controller logic failed")):
+
+        with patch.object(
+            self.mc, "send_command", side_effect=RuntimeError("Controller logic failed")
+        ):
             res = self.api.send_command("set_safety_limit", {"limit_mN": 1000})
             self.assertFalse(res["success"])
             self.assertEqual(res["error_kind"], "system")
@@ -873,7 +898,7 @@ class TestWebviewAPIEdgeCases(unittest.TestCase):
 
     def test_storage_failures_in_api(self):
         from unittest.mock import patch
-        
+
         # presets load error
         with patch.object(self.storage, "load_presets", side_effect=OSError("HD full")):
             self.assertEqual(self.api.load_presets(), {})
@@ -906,6 +931,7 @@ class TestWebviewAPIEdgeCases(unittest.TestCase):
 
     def test_list_ports_success(self):
         from unittest.mock import MagicMock
+
         mock_port = MagicMock()
         mock_port.device = "/dev/ttyUSB9"
         mock_port.description = "Orca 6 Linear Actuator"
@@ -920,7 +946,10 @@ class TestWebviewAPIEdgeCases(unittest.TestCase):
             self.assertEqual(self.api.list_ports(), [])
 
     def test_connect_port_success(self):
-        with patch.object(self.mc, "stop") as mock_stop, patch.object(self.mc, "start") as mock_start:
+        with (
+            patch.object(self.mc, "stop") as mock_stop,
+            patch.object(self.mc, "start") as mock_start,
+        ):
             self.mc.baud = 9600
             res = self.api.connect_port("/dev/ttyUSB2")
             self.assertTrue(res["success"])
@@ -939,6 +968,7 @@ class TestRebuildFrontend(unittest.TestCase):
 
     def test_rebuild_if_no_src_files(self):
         from unittest.mock import patch
+
         with patch("pathlib.Path.rglob", return_value=[]):
             # Should return immediately without checking dist or running subprocess
             with patch("subprocess.run") as mock_run:
@@ -946,7 +976,8 @@ class TestRebuildFrontend(unittest.TestCase):
                 mock_run.assert_not_called()
 
     def test_rebuild_if_up_to_date(self):
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
         src_mock = MagicMock()
         src_mock.is_file.return_value = True
         src_mock.stat.return_value.st_mtime = 1000.0
@@ -963,7 +994,8 @@ class TestRebuildFrontend(unittest.TestCase):
                         mock_run.assert_not_called()
 
     def test_rebuild_runs_npm_successfully(self):
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
         src_mock = MagicMock()
         src_mock.is_file.return_value = True
         src_mock.stat.return_value.st_mtime = 2000.0
@@ -980,13 +1012,17 @@ class TestRebuildFrontend(unittest.TestCase):
                         main_module._rebuild_frontend_if_stale()
                         mock_run.assert_called_once_with(
                             ["npm", "run", "build"],
-                            cwd=main_module.Path(__file__).resolve().parent.parent / "src" / "wavedriver" / "web",
+                            cwd=main_module.Path(__file__).resolve().parent.parent
+                            / "src"
+                            / "wavedriver"
+                            / "web",
                             capture_output=True,
                             text=True,
                         )
 
     def test_rebuild_runs_npm_fails(self):
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
         src_mock = MagicMock()
         src_mock.is_file.return_value = True
         src_mock.stat.return_value.st_mtime = 2000.0
@@ -1001,7 +1037,8 @@ class TestRebuildFrontend(unittest.TestCase):
                             main_module._rebuild_frontend_if_stale()
 
     def test_rebuild_runs_npm_not_found(self):
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
         src_mock = MagicMock()
         src_mock.is_file.return_value = True
         src_mock.stat.return_value.st_mtime = 2000.0
@@ -1018,11 +1055,12 @@ class TestCLIArgsAndMain(unittest.TestCase):
     """Verifies that the CLI entrypoint handles arguments and configures modes properly."""
 
     def test_list_ports_success(self):
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
         mock_port = MagicMock()
         mock_port.device = "/dev/ttyUSB0"
         mock_port.description = "USB Serial Device"
-        
+
         with patch("sys.argv", ["wavedriver", "--list-ports"]):
             with patch("serial.tools.list_ports.comports", return_value=[mock_port]):
                 with patch("builtins.print") as mock_print:
@@ -1033,8 +1071,9 @@ class TestCLIArgsAndMain(unittest.TestCase):
 
     def test_list_ports_import_error(self):
         from unittest.mock import patch
+
         with patch("sys.argv", ["wavedriver", "--list-ports"]):
-            with patch("builtins.print") as mock_print:
+            with patch("builtins.print"):
                 with patch("serial.tools.list_ports.comports", side_effect=ImportError):
                     with self.assertRaises(SystemExit) as cm:
                         main_module.main()
@@ -1050,7 +1089,7 @@ class TestCLIArgsAndMain(unittest.TestCase):
     @patch("wavedriver.main.MotorController")
     def test_main_runs_dev_mode(self, mock_mc_cls, mock_start, mock_create_window):
         mock_mc = mock_mc_cls.return_value
-        
+
         with patch("sys.argv", ["wavedriver", "--mock", "--dev"]):
             main_module.main()
             mock_mc.start.assert_called_once()
@@ -1073,15 +1112,27 @@ class TestNewInteractiveFeatures(unittest.TestCase):
     def test_adaptive_pattern_ease(self):
         # With zero force, ease should not scale the stroke
         mode, val1 = patterns.adaptive_pattern(
-            t=1.0, position_um=75000, speed_mm_s=0.0, L=150000,
-            stroke_length_um=80000, frequency_hz=1.0, force_mN=0.0,
-            adaptive_mode="ease", sensitivity=1.0
+            t=1.0,
+            position_um=75000,
+            speed_mm_s=0.0,
+            L=150000,
+            stroke_length_um=80000,
+            frequency_hz=1.0,
+            force_mN=0.0,
+            adaptive_mode="ease",
+            sensitivity=1.0,
         )
         # With high force, ease should scale down stroke/amplitude
         mode, val2 = patterns.adaptive_pattern(
-            t=1.0, position_um=75000, speed_mm_s=0.0, L=150000,
-            stroke_length_um=80000, frequency_hz=1.0, force_mN=25000.0,
-            adaptive_mode="ease", sensitivity=1.0
+            t=1.0,
+            position_um=75000,
+            speed_mm_s=0.0,
+            L=150000,
+            stroke_length_um=80000,
+            frequency_hz=1.0,
+            force_mN=25000.0,
+            adaptive_mode="ease",
+            sensitivity=1.0,
         )
         self.assertEqual(mode, "position")
         # With force_mN=25000, force_ratio is 1.0. stroke_scale = 1.0 - 0.75 * 1.0 = 0.25.
@@ -1090,16 +1141,30 @@ class TestNewInteractiveFeatures(unittest.TestCase):
         # Since t=1.0 and freq=1.0, math.sin(phase) at phase=2pi is 0. So let's test at phase = pi/2
         # phase = pi/2 when frequency_hz = 1.0 and t = 0.25 (2*pi*1.0*0.25 = pi/2)
         _, peak1 = patterns.adaptive_pattern(
-            t=0.25, position_um=75000, speed_mm_s=0.0, L=150000,
-            stroke_length_um=80000, frequency_hz=1.0, force_mN=0.0,
-            adaptive_mode="ease", sensitivity=1.0, _phase=math.pi/2,
-            _amplitude_scale=1.0
+            t=0.25,
+            position_um=75000,
+            speed_mm_s=0.0,
+            L=150000,
+            stroke_length_um=80000,
+            frequency_hz=1.0,
+            force_mN=0.0,
+            adaptive_mode="ease",
+            sensitivity=1.0,
+            _phase=math.pi / 2,
+            _amplitude_scale=1.0,
         )
         _, peak2 = patterns.adaptive_pattern(
-            t=0.25, position_um=75000, speed_mm_s=0.0, L=150000,
-            stroke_length_um=80000, frequency_hz=1.0, force_mN=25000.0,
-            adaptive_mode="ease", sensitivity=1.0, _phase=math.pi/2,
-            _amplitude_scale=1.0
+            t=0.25,
+            position_um=75000,
+            speed_mm_s=0.0,
+            L=150000,
+            stroke_length_um=80000,
+            frequency_hz=1.0,
+            force_mN=25000.0,
+            adaptive_mode="ease",
+            sensitivity=1.0,
+            _phase=math.pi / 2,
+            _amplitude_scale=1.0,
         )
         # peak1: C + A_orig = 75000 + 40000 = 115000
         # peak2: C + A_scaled = 75000 + (40000 * 0.25) = 85000
@@ -1109,10 +1174,17 @@ class TestNewInteractiveFeatures(unittest.TestCase):
     def test_adaptive_pattern_give_and_take(self):
         # push force shifts center backwards
         _, pos_push = patterns.adaptive_pattern(
-            t=0.25, position_um=75000, speed_mm_s=0.0, L=150000,
-            stroke_length_um=80000, frequency_hz=1.0, force_mN=25000.0,
-            adaptive_mode="give_and_take", sensitivity=1.0, _phase=0.0,
-            _amplitude_scale=1.0
+            t=0.25,
+            position_um=75000,
+            speed_mm_s=0.0,
+            L=150000,
+            stroke_length_um=80000,
+            frequency_hz=1.0,
+            force_mN=25000.0,
+            adaptive_mode="give_and_take",
+            sensitivity=1.0,
+            _phase=0.0,
+            _amplitude_scale=1.0,
         )
         # C_shifted: center shifts back by 25mm = 25000 um
         # base C = 75000, shift is -25000 => C_shifted = 50000.
@@ -1122,16 +1194,17 @@ class TestNewInteractiveFeatures(unittest.TestCase):
         self.assertAlmostEqual(pos_push, 50000.0, delta=1.0)
 
     def test_funscript_pattern(self):
-        actions = [
-            [0.0, 0.0],
-            [1.0, 100.0],
-            [2.0, 0.0]
-        ]
+        actions = [[0.0, 0.0], [1.0, 100.0], [2.0, 0.0]]
         # At t=0.5, pos should be 50%
         _, pos_half = patterns.funscript_pattern(
-            t=0.5, position_um=75000, speed_mm_s=0.0, L=150000,
-            stroke_length_um=100000, funscript_actions=actions, funscript_loop=True,
-            _amplitude_scale=1.0
+            t=0.5,
+            position_um=75000,
+            speed_mm_s=0.0,
+            L=150000,
+            stroke_length_um=100000,
+            funscript_actions=actions,
+            funscript_loop=True,
+            _amplitude_scale=1.0,
         )
         # C = 75000, A = 50000. Range is [25000, 125000].
         # 50% should map to C = 75000

@@ -180,7 +180,7 @@ class _MpvController:
                         if not chunk:
                             break
                         self._buf += chunk
-                    except _socket.timeout:
+                    except TimeoutError:
                         pass
                     while b"\n" in self._buf:
                         line, self._buf = self._buf.split(b"\n", 1)
@@ -260,7 +260,9 @@ class _AppHTTPHandler(BaseHTTPRequestHandler):
         if dist_dir is None:
             self.send_error(404)
             return
-        candidate = dist_dir / clean_path.lstrip("/") if clean_path != "/" else dist_dir / "index.html"
+        candidate = (
+            dist_dir / clean_path.lstrip("/") if clean_path != "/" else dist_dir / "index.html"
+        )
         if not candidate.is_file():
             candidate = dist_dir / "index.html"
         if not candidate.is_file():
