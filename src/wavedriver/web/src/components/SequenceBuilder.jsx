@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Layers, Plus, Trash2, Play, Square, FastForward, Clock } from 'lucide-react';
 
 const PATTERNS = ["Wave", "Realistic", "Thrust", "Pulse", "Tease", "Escalate", "Edge", "Depth", "Adaptive"];
@@ -50,25 +50,7 @@ export function SequenceBuilder({
     executeStep(steps[0]);
   };
 
-  const stopSequence = () => {
-    setIsSequencePlaying(false);
-    setActiveStepIdx(null);
-    setStepTimeRemaining(0);
-    stopPattern();
-  };
-
-  const nextStep = () => {
-    const nextIdx = activeStepIdx + 1;
-    if (nextIdx < steps.length) {
-      setActiveStepIdx(nextIdx);
-      setStepTimeRemaining(steps[nextIdx].duration);
-      executeStep(steps[nextIdx]);
-    } else {
-      stopSequence();
-    }
-  };
-
-  const executeStep = (step) => {
+  const executeStep = useCallback((step) => {
     // Set UI states so sliders align
     setPatternName(step.pattern);
     setFrequencyHz(step.freq);
@@ -82,7 +64,25 @@ export function SequenceBuilder({
       strokeLengthMm: step.stroke,
       intensityPct: step.intensity,
     });
-  };
+  }, [setPatternName, setFrequencyHz, setStrokeLengthMm, onIntensityChange, startPattern]);
+
+  const stopSequence = useCallback(() => {
+    setIsSequencePlaying(false);
+    setActiveStepIdx(null);
+    setStepTimeRemaining(0);
+    stopPattern();
+  }, [stopPattern]);
+
+  const nextStep = useCallback(() => {
+    const nextIdx = activeStepIdx + 1;
+    if (nextIdx < steps.length) {
+      setActiveStepIdx(nextIdx);
+      setStepTimeRemaining(steps[nextIdx].duration);
+      executeStep(steps[nextIdx]);
+    } else {
+      stopSequence();
+    }
+  }, [activeStepIdx, steps, executeStep, stopSequence]);
 
   // Timer loop for sequence playback
   useEffect(() => {
@@ -92,14 +92,18 @@ export function SequenceBuilder({
           setStepTimeRemaining(prev => prev - 1);
         }, 1000);
       } else {
-        nextStep();
+        setTimeout(() => {
+          nextStep();
+        }, 0);
       }
     } else if (!isRunning && isSequencePlaying) {
-      stopSequence();
+      setTimeout(() => {
+        stopSequence();
+      }, 0);
     }
 
     return () => clearTimeout(timerRef.current);
-  }, [isSequencePlaying, activeStepIdx, stepTimeRemaining, isRunning]);
+  }, [isSequencePlaying, activeStepIdx, stepTimeRemaining, isRunning, nextStep, stopSequence]);
 
   return (
     <div className="control-card glass">

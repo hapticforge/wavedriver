@@ -67,7 +67,7 @@ export function AdvancedDrawer({
   shuffleMaxFreq, setShuffleMaxFreq,
   // History
   historyEnabled, onHistoryEnabledChange,
-  sessionHistory, onClearHistory,
+  onClearHistory,
   onToggleHistory, showHistory,
   // Activity log
   showActivityLog, onToggleActivityLog,

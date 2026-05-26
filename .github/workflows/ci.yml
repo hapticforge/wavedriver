@@ -21,7 +21,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --all-extras
 
       - name: Lint (ruff check)
         run: uv run ruff check src/ tests/
@@ -47,7 +47,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --all-extras
 
       - name: Run tests with coverage
         run: uv run --with pytest --with pytest-cov pytest tests/ --cov=wavedriver --cov-report=term-missing --cov-fail-under=60

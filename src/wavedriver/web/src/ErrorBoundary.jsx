@@ -23,7 +23,9 @@ export class ErrorBoundary extends React.Component {
   handleEstop = () => {
     try {
       window.pywebview?.api?.send_command("estop", { reason: "UI crashed — Emergency Stop" });
-    } catch (_) {}
+    } catch {
+      // Ignore error
+    }
   };
 
   handleRetry = () => {

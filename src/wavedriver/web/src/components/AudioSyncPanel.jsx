@@ -1,11 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Music, Mic } from 'lucide-react';
 
 export function AudioSyncPanel({
   isRunning,
   intensityPct,
   onIntensityChange,
-  frequencyHz,
   onFrequencyChange,
 }) {
   const [isActive, setIsActive] = useState(false);
@@ -25,7 +24,44 @@ export function AudioSyncPanel({
   const lastBeatTime = useRef(0);
   const beatTimestamps = useRef([]);
 
-  const startAudioSync = async () => {
+  const stopAudioSync = useCallback(() => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    if (sourceRefNode.current) {
+      try {
+        sourceRefNode.current.disconnect();
+      } catch {
+        // Silently ignore
+      }
+      sourceRefNode.current = null;
+    }
+    if (streamRef.current) {
+      try {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      } catch {
+        // Silently ignore
+      }
+      streamRef.current = null;
+    }
+    if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
+      try {
+        audioCtxRef.current.close();
+      } catch {
+        // Silently ignore
+      }
+      audioCtxRef.current = null;
+    }
+    setTimeout(() => {
+      setIsActive(false);
+      setVolumeLevel(0);
+      setDetectedBpm(null);
+    }, 0);
+    beatTimestamps.current = [];
+  }, []);
+
+  const startAudioSync = useCallback(async () => {
     try {
       // Clean up any existing instances first
       stopAudioSync();
@@ -39,40 +75,13 @@ export function AudioSyncPanel({
       sourceRefNode.current = audioCtxRef.current.createMediaStreamSource(stream);
       sourceRefNode.current.connect(analyserRef.current);
       
-      setIsActive(true);
+      setTimeout(() => {
+        setIsActive(true);
+      }, 0);
     } catch (err) {
       alert("Failed to access microphone: " + err.message);
     }
-  };
-
-  const stopAudioSync = () => {
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
-    if (sourceRefNode.current) {
-      try {
-        sourceRefNode.current.disconnect();
-      } catch {}
-      sourceRefNode.current = null;
-    }
-    if (streamRef.current) {
-      try {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      } catch {}
-      streamRef.current = null;
-    }
-    if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
-      try {
-        audioCtxRef.current.close();
-      } catch {}
-      audioCtxRef.current = null;
-    }
-    setIsActive(false);
-    setVolumeLevel(0);
-    setDetectedBpm(null);
-    beatTimestamps.current = [];
-  };
+  }, [stopAudioSync]);
 
   // Sync mic activity with global running state
   useEffect(() => {
@@ -84,7 +93,7 @@ export function AudioSyncPanel({
     return () => {
       stopAudioSync();
     };
-  }, [isRunning]);
+  }, [isRunning, startAudioSync, stopAudioSync]);
 
   useEffect(() => {
     if (!isActive) return;

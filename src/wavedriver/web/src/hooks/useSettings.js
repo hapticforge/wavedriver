@@ -73,7 +73,7 @@ export function useSettings({ apiReady, sendCommand, setHistoryEnabled }) {
         console.error("Failed to load presets:", e);
       }
     })();
-  }, [apiReady, sendCommand]);
+  }, [apiReady, sendCommand, setHistoryEnabled]);
 
   // Keep controller ref in sync with historyEnabled state
   useEffect(() => {

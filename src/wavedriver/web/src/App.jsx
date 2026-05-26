@@ -51,8 +51,8 @@ function AppInner() {
     shuffleDwellS,  setShuffleDwellS,
     shuffleMinFreq, setShuffleMinFreq,
     shuffleMaxFreq, setShuffleMaxFreq,
-    shuffleMinStroke, setShuffleMinStroke,
-    shuffleMaxStroke, setShuffleMaxStroke,
+    shuffleMinStroke,
+    shuffleMaxStroke,
   } = useSettings({ apiReady, sendCommand, setHistoryEnabled });
 
   const settingsRef = useRef({});

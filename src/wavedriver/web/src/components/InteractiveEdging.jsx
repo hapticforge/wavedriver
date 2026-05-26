@@ -28,17 +28,19 @@ export function InteractiveEdging({ isRunning, intensityPct, onIntensityChange }
         setCooldownRemaining(prev => prev - 1);
       }, 1000);
     } else if (cooldownRemaining === 0 && edgingActive) {
-      if (surpriseDenial && Math.random() < 0.5) {
-        setDenied(true);
-        onIntensityChange(0);
-        setCooldownRemaining(5);
-        setSurpriseDenial(false);
-        return;
-      }
+      setTimeout(() => {
+        if (surpriseDenial && Math.random() < 0.5) {
+          setDenied(true);
+          onIntensityChange(0);
+          setCooldownRemaining(5);
+          setSurpriseDenial(false);
+          return;
+        }
 
-      onIntensityChange(savedIntensity.current);
-      setEdgingActive(false);
-      setDenied(false);
+        onIntensityChange(savedIntensity.current);
+        setEdgingActive(false);
+        setDenied(false);
+      }, 0);
     }
 
     return () => clearTimeout(timerRef.current);
@@ -46,9 +48,11 @@ export function InteractiveEdging({ isRunning, intensityPct, onIntensityChange }
 
   useEffect(() => {
     if (!isRunning) {
-      setEdgingActive(false);
-      setCooldownRemaining(0);
-      setDenied(false);
+      setTimeout(() => {
+        setEdgingActive(false);
+        setCooldownRemaining(0);
+        setDenied(false);
+      }, 0);
     }
   }, [isRunning]);
 
