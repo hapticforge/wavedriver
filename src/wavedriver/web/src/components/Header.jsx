@@ -1,4 +1,4 @@
-import { Activity, Zap, LogOut, HelpCircle, Settings } from 'lucide-react';
+import { Zap, LogOut, HelpCircle, Settings } from 'lucide-react';
 
 function getStateClass(stateEnum, paused) {
   switch (stateEnum) {
